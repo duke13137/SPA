@@ -1,0 +1,17 @@
+.*
+
+build/
+resources
+resources/
+target/
+
+__pycache__/
+package-lock.json
+node_modules
+*.mjs
+*_cherry.*
+
+!.ghci
+ghcid.txt
+static-ls
+*tags*

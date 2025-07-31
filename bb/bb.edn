@@ -1,0 +1,24 @@
+{:paths ["."]
+ :deps {org.clojure/clojure {:mvn/version "RELEASE"}
+        com.fulcrologic/guardrails {:mvn/version "RELEASE"}
+        com.rpl/specter {:mvn/version "RELEASE"}
+        funcool/promesa {:mvn/version "RELEASE"}
+
+        com.github.gnl/playback {:mvn/version "RELEASE"}
+        vvvvalvalval/scope-capture {:mvn/version "RELEASE"}
+
+        dev.data-star.clojure/sdk {:mvn/version "RELEASE"}
+        dev.data-star.clojure/http-kit {:mvn/version "RELEASE"}
+        dev.data-star.clojure/malli-schemas {:mvn/version "RELEASE"}
+        ring/ring-core {:mvn/version "RELEASE"}
+        org.clojars.askonomm/ruuter {:mvn/version "RELEASE"}
+
+        com.cognitect.aws/api {:mvn/version "RELEASE"}
+        com.cognitect.aws/endpoints {:mvn/version "RELEASE"}
+        com.cognitect.aws/dynamodb {:mvn/version "RELEASE"}
+        com.cognitect.aws/s3 {:mvn/version "RELEASE"}}
+
+  :pods {huahaiy/datalevin {:version "0.9.20"}
+         org.babashka/go-sqlite3 {:version "0.2.4"}}
+
+  :tasks {}}
