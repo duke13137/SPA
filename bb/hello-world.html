@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <title>Datastar SDK Demo</title>
+    <link
+      rel="stylesheet"
+      href="https://cdn.jsdelivr.net/npm/@picocss/pico@2/css/pico.min.css"
+    />
+    <script
+      type="module"
+      src="https://cdn.jsdelivr.net/gh/starfederation/datastar@1.0.0-RC.6/bundles/datastar.js"
+    ></script>
+  </head>
+  <body class="bg-white dark:bg-gray-900 text-lg max-w-xl mx-auto my-16">
+    <div data-signals:delay="400">
+      <div class="container">
+        <h1 class="text-gray-900 dark:text-white text-3xl font-semibold">
+          Datastar SDK Demo
+        </h1>
+        <img
+          src="https://data-star.dev/static/images/rocket-64x64.png"
+          alt="Rocket"
+          width="64"
+          height="64"
+        />
+        <p>SSE events will be streamed from the backend to the frontend.</p>
+      </div>
+      <div class="container">
+        <label for="delay"> Delay in milliseconds </label>
+        <input data-bind:delay id="delay" type="number" step="100" min="0" />
+        <button data-on:click="@get('/hello-sse')">Start</button>
+      </div>
+    </div>
+    <div class="container">
+      <h1 id="message">Hello, world!</h1>
+      <h1 id="clock" data-on-interval__duration.1s="@get('/clock-sse')">
+        Loading...
+      </h1>
+    </div>
+  </body>
+</html>
