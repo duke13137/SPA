@@ -1,0 +1,33 @@
+{:paths ["."]
+ :deps {org.clojure/clojure {:mvn/version "RELEASE"}
+        funcool/promesa {:mvn/version "RELEASE"}
+
+        com.fulcrologic/guardrails {:mvn/version "RELEASE"}
+        com.github.gnl/playback {:mvn/version "RELEASE"}
+        djblue/portal {:mvn/version "RELEASE"}
+        vvvvalvalval/scope-capture {:mvn/version "RELEASE"}
+
+        dev.data-star.clojure/sdk {:mvn/version "RELEASE"}
+        dev.data-star.clojure/http-kit {:mvn/version "RELEASE"}
+        dev.data-star.clojure/malli-schemas {:mvn/version "RELEASE"}
+        ring/ring-core {:mvn/version "RELEASE"}
+        org.clojars.askonomm/ruuter {:mvn/version "RELEASE"}
+
+        com.grzm/awyeah-api {:git/url "https://github.com/grzm/awyeah-api"
+                             :git/sha "e5513349a2fd8a980a62bbe0d45a0d55bfcea141"}
+        com.cognitect.aws/api {:mvn/version "RELEASE"}
+        com.cognitect.aws/endpoints {:mvn/version "RELEASE"}
+        com.cognitect.aws/config {:mvn/version "RELEASE"}
+        com.cognitect.aws/iam {:mvn/version "RELEASE"}
+        com.cognitect.aws/dynamodb {:mvn/version "RELEASE"}
+        com.cognitect.aws/ec2 {:mvn/version "RELEASE"}
+        com.cognitect.aws/s3 {:mvn/version "RELEASE"}
+        com.cognitect.aws/sns {:mvn/version "RELEASE"}
+        com.cognitect.aws/sqs {:mvn/version "RELEASE"}
+        com.cognitect.aws/ssm {:mvn/version "RELEASE"}
+        com.cognitect.aws/sts {:mvn/version "RELEASE"}}
+
+  :pods {huahaiy/datalevin {:version "0.9.20"}
+         org.babashka/go-sqlite3 {:version "0.2.4"}}
+
+  :tasks {}}
