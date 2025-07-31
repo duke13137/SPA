@@ -1,0 +1,22 @@
+-- :set -fplugin=Debug.Breakpoint
+:set -fplugin=AutoSplit
+
+:seti -XGHC2021
+:seti -XPartialTypeSignatures
+:seti -XOverloadedLabels
+:seti -XOverloadedRecordDot
+
+:set -fdefer-type-errors
+:set -fno-defer-typed-holes
+:set -Werror=deferred-out-of-scope-variables
+:set -Werror=deferred-type-errors
+
+:set -Wno-type-defaults
+:set -Wno-unused-top-binds
+
+:set -fwrite-ide-info
+:set -outputdir .build
+
+:set -isrc
+
+:load Main

@@ -1,0 +1,4 @@
+{:guardrails/stack-trace :none
+ :guardrails/compact? true
+ :guardrails/trace? true
+ :throw? true}
