@@ -1,5 +1,6 @@
 {-# LANGUAGE BlockArguments    #-}
 {-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE QuasiQuotes       #-}
 module Test () where
 
 import Main (app, server)
@@ -7,6 +8,11 @@ import Rapid
 import Test.Tasty
 import Test.Tasty.HUnit
 import Test.Tasty.Wai as Test
+
+import Database
+import Hasql.Session qualified as Session
+import Hasql.Statement
+import Hasql.TH
 
 -- $> main
 main :: IO ()

@@ -1,7 +1,7 @@
--- :set -fplugin=Debug.Breakpoint
 :set -fplugin=AutoSplit
+:set -fplugin=Debug.Breakpoint
 
-:seti -XGHC2021
+:seti -XGHC2024
 :seti -XPartialTypeSignatures
 :seti -XOverloadedLabels
 :seti -XOverloadedRecordDot
