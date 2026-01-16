@@ -1,3 +1,4 @@
+{-# LANGUAGE BlockArguments    #-}
 {-# LANGUAGE OverloadedStrings #-}
 module Database where
 
@@ -10,9 +11,10 @@ import Hasql.Pool qualified as Pool
 import Hasql.Pool.Config qualified as Pool
 import Hasql.Session (Session)
 import Hasql.Session qualified as Session
+import Hasql.Statement
 
-transact :: Session.Session a -> IO (Either ConnectionError (Either SessionError a))
-transact sess = withConnection $ \conn -> Connection.use conn sess
+runDB :: Session.Session a -> IO (Either ConnectionError (Either SessionError a))
+runDB sess = withConnection $ \conn -> Connection.use conn sess
 
 withConnection :: (Connection.Connection -> IO a) -> IO (Either ConnectionError a)
 withConnection handler = do

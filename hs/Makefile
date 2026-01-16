@@ -17,9 +17,9 @@ env:
 	cabal install -w ghc-$(GHC) --allow-newer --enable-documentation --package-env . --lib \
 		base relude bytestring text containers unordered-containers \
 		aeson optics aeson-optics optparse-generic pretty-show strict-wrapper \
-		bluefin io-classes io-sim stm stm-containers streamly-core\
+		bluefin co-log  io-classes io-sim stm stm-containers streamly-core\
 		hasql hasql-th hasql-implicits hasql-pool hasql-transaction \
-		co-log lucid2 twain wai wai-extra warp template-haskell \
+		atomic-css hyperbole twain wai wai-extra warp template-haskell \
 		auto-split breakpoint rapid tasty tasty-hunit tasty-wai
 
 hie:
