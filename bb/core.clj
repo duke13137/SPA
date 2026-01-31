@@ -7,6 +7,8 @@
     [org.httpkit.server :as srv]
     [ring.middleware.params :refer [wrap-params]]
     [clj-simple-router.core :as router]
+    [promesa.core :as p]
+    [promesa.exec.csp :as sp :refer [go >! <!]]
     [selmer.parser :refer [render-file]]
     [starfederation.datastar.clojure.api :as d*]
     [starfederation.datastar.clojure.adapter.http-kit2 :as hk]))
@@ -15,9 +17,11 @@
 (require '[sc.api :as sc])
 (require '[portal.console :as log])
 
+(require '[sci.nrepl.browser-server :as nrepl])
+(nrepl/start! {:nrepl-port 1339 :websocket-port 1340})
+
 (comment
-  (require '[promesa.core :as p]
-           '[promesa.exec.csp :as sp :refer [go >! <!]])
+
   'comment)
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -66,6 +70,10 @@
   {:status 200
    :body (render-file "index.html" {})})
 
+(defn js [req]
+  {:status 200
+   :body (render-file "client.cljs" {})})
+
 (def message "Hello, world!")
 
 (defn hello-sse [req sse]
@@ -98,6 +106,7 @@
 ;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 (def routes {"GET /" index
+             "GET /client.cljs" js
              "GET /hello" hello-page
              "GET /hello-sse" (sse #'hello-sse)
              "GET /clock-sse" (sse #'clock-sse)})
