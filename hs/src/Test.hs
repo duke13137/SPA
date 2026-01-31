@@ -36,7 +36,7 @@ testRoute = testGroup "Tasty.Wai Tests"
       assertBodyContains "Not found" resp
   ]
 
---- $> testDB
+-- $> testDB
 testDB :: IO ()
 testDB = do
   runDB (sumAndDivModSession  3 8 3) >>= print
@@ -46,9 +46,7 @@ testDB = do
 
 sumAndDivModSession :: Int64 -> Int64 -> Int64 -> Session (Int64, Int64)
 sumAndDivModSession a b c = do
-  -- Get the sum of a and b
   sumOfAAndB <- statement (a, b) sumStatement
-  -- Divide the sum by c and get the modulo as well
   statement (sumOfAAndB, c) divModStatement
 
 sumStatement :: Statement (Int64, Int64) Int64
