@@ -19,10 +19,10 @@ runDB sess = withConnection $ \conn -> Connection.use conn sess
 withConnection :: (Connection.Connection -> IO a) -> IO (Either ConnectionError a)
 withConnection handler = do
   setting <- getConnectionSetting
-  runExceptT $ acquire setting >>= \connection -> use connection <* release connection
+  runExceptT $ acquire setting >>= \connection -> run connection <* release connection
   where
     acquire settings = ExceptT $ Connection.acquire settings
-    use connection = lift $ handler connection
+    run connection = lift $ handler connection
     release connection = lift $ Connection.release connection
 
 withPool :: (Pool.Pool -> IO a) -> IO a

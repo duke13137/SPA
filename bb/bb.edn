@@ -22,4 +22,4 @@
         com.cognitect.aws/dynamodb {:mvn/version "RELEASE"}
         com.cognitect.aws/s3 {:mvn/version "RELEASE"}}
 
-  :pods {huahaiy/datalevin {:version "0.10.2"}}}
+ :pods {huahaiy/datalevin {:version "0.10.5"}}}

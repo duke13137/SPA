@@ -25,6 +25,7 @@ import Web.Atomic.CSS
 import Web.Hyperbole as H
 
 import Data.IntMap.Strict qualified as IntMap
+import Data.Text qualified as T
 
 import Colog
 import Database
@@ -123,7 +124,8 @@ getTodoListPartial :: Todos -> ResponderM a
 getTodoListPartial todos = do
   items <- liftIO $ readTVarIO todos
   filter_ <- Twain.paramMaybe @Text "filter"
-  render $ todoListSection items (fromMaybe "all" filter_)
+  search_ <- Twain.paramMaybe @Text "search"
+  render $ todoListSection items (fromMaybe "" search_) (fromMaybe "all" filter_)
 
 addTodo :: Todos -> NextId -> ResponderM a
 addTodo todos nextId = do
@@ -134,7 +136,7 @@ addTodo todos nextId = do
     modifyTVar' todos (IntMap.insert i (Todo title' False))
   items <- liftIO $ readTVarIO todos
   render do
-    todoListSection items "all"
+    todoListSection items "" "all"
     [hsx|<input id="todo-input" name="title" placeholder="What needs to be done?" required autofocus hx-swap-oob="true">|]
 
 toggleTodo :: Todos -> ResponderM a
@@ -143,7 +145,7 @@ toggleTodo todos = do
   liftIO $ atomically $
     modifyTVar' todos (IntMap.adjust (\t -> Todo t.title (not t.completed)) i)
   items <- liftIO $ readTVarIO todos
-  render $ todoListSection items "all"
+  render $ todoListSection items "" "all"
 
 deleteTodo :: Todos -> ResponderM a
 deleteTodo todos = do
@@ -151,14 +153,14 @@ deleteTodo todos = do
   liftIO $ atomically $
     modifyTVar' todos (IntMap.delete i)
   items <- liftIO $ readTVarIO todos
-  render $ todoListSection items "all"
+  render $ todoListSection items "" "all"
 
 clearCompleted :: Todos -> ResponderM a
 clearCompleted todos = do
   liftIO $ atomically $
     modifyTVar' todos (IntMap.filter (not . (.completed)))
   items <- liftIO $ readTVarIO todos
-  render $ todoListSection items "all"
+  render $ todoListSection items "" "all"
 
 -- Todo views
 todoPage :: IntMap Todo -> Text -> Html ()
@@ -171,6 +173,9 @@ todoPage items filterBy = htmx [hsx|
         <button type="submit">Add</button>
       </fieldset>
     </form>
+    <input type="search" name="search"
+           hx-get="/todos/list" hx-trigger="input changed delay:300ms, search"
+           hx-target="#todo-list" placeholder="Search todos...">
     <nav>
       <ul>
         <li><a href="#" hx-get="/todos/list?filter=all" hx-target="#todo-list">All</a></li>
@@ -178,15 +183,15 @@ todoPage items filterBy = htmx [hsx|
         <li><a href="#" hx-get="/todos/list?filter=completed" hx-target="#todo-list">Completed</a></li>
       </ul>
     </nav>
-    {todoListSection items filterBy}
+    {todoListSection items "" filterBy}
   </article>
 |]
 
-todoListSection :: IntMap Todo -> Text -> Html ()
-todoListSection items filterBy = [hsx|
+todoListSection :: IntMap Todo -> Text -> Text -> Html ()
+todoListSection items searchQ filterBy = [hsx|
   <section id="todo-list">
     <ul style="list-style: none; padding: 0;">
-      {mapM_ (uncurry todoItem) filterby}
+      {mapM_ (uncurry todoItem) matched}
     </ul>
     <footer style="display: flex; justify-content: space-between; align-items: center;">
       <small>{activeCountText}</small>
@@ -195,10 +200,13 @@ todoListSection items filterBy = [hsx|
   </section>
 |]
   where
-    filterby = case filterBy of
-      "active"    -> IntMap.toList $ IntMap.filter (not . (.completed)) items
-      "completed" -> IntMap.toList $ IntMap.filter (.completed) items
-      _           -> IntMap.toList items
+    searched
+      | T.null searchQ = items
+      | otherwise      = IntMap.filter (\t -> T.toLower searchQ `T.isInfixOf` T.toLower t.title) items
+    matched = case filterBy of
+      "active"    -> IntMap.toList $ IntMap.filter (not . (.completed)) searched
+      "completed" -> IntMap.toList $ IntMap.filter (.completed) searched
+      _           -> IntMap.toList searched
     activeCount = IntMap.size $ IntMap.filter (not . (.completed)) items
     activeCountText :: Text
     activeCountText = show activeCount <> " item" <> (if activeCount == 1 then "" else "s") <> " left"

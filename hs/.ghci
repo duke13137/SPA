@@ -3,6 +3,7 @@
 
 :seti -XGHC2024
 :seti -XPartialTypeSignatures
+:seti -XNoFieldSelectors
 :seti -XOverloadedLabels
 :seti -XOverloadedRecordDot
 

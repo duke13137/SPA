@@ -25,7 +25,7 @@ env:
 		--lib base template-haskell relude text containers stm stm-containers \
 					aeson optics aeson-optics pretty-show strict-wrapper time \
 					bluefin co-log io-classes io-sim streamly-core wai wai-extra warp \
-					hasql hasql-th hasql-implicits hasql-pool hasql-transaction \
+					hasql hasql-th hasql-postgresql-types hasql-pool hasql-transaction \
 					atomic-css cookie http-api-data http-types hyperbole twain \
 					auto-split breakpoint rapid tasty tasty-hunit tasty-wai
 

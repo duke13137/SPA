@@ -1,18 +1,15 @@
 {-# LANGUAGE NoImplicitPrelude #-}
 module Prelude (
   module Relude
-, module Classes
+, module Monads
+, module Optics
 , module Data.Strict.Wrapper
 ) where
 
-import Relude hiding (STM, atomically, throwSTM)
+import Optics hiding (uncons)
+import Relude
 
-import Control.Monad.Class.MonadAsync as Classes
-import Control.Monad.Class.MonadFork as Classes
-import Control.Monad.Class.MonadSay as Classes
-import Control.Monad.Class.MonadSTM as Classes
-import Control.Monad.Class.MonadThrow as Classes
-import Control.Monad.Class.MonadTime as Classes
-import Control.Monad.Class.MonadTimer as Classes
+import Control.Monad.Class.MonadAsync as Monads
+import Control.Monad.Class.MonadThrow as Monads
 
 import Data.Strict.Wrapper
