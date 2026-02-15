@@ -1,6 +1,5 @@
 {:paths ["."]
- :deps {org.clojure/clojure {:mvn/version "RELEASE"}
-        com.rpl/specter     {:mvn/version "RELEASE"}
+ :deps {com.rpl/specter     {:mvn/version "RELEASE"}
         funcool/promesa     {:mvn/version "RELEASE"}
 
         djblue/portal              {:mvn/version "RELEASE"}

@@ -4,7 +4,7 @@
     [clojure.string :as str]
     [cheshire.core :as json]
     [hiccup2.core :as h]
-    [org.httpkit.server :as srv]
+    [org.httpkit.server]
     [ring.middleware.params :refer [wrap-params]]
     [clj-simple-router.core :as router]
     [promesa.core :as p]
@@ -14,11 +14,10 @@
     [starfederation.datastar.clojure.adapter.http-kit2 :as hk]))
 
 (require '[playback.core])
-(require '[sc.api :as sc])
 (require '[portal.console :as log])
-
-(require '[sci.nrepl.browser-server :as nrepl])
-(nrepl/start! {:nrepl-port 1339 :websocket-port 1340})
+(require '[sc.api :as sc])
+(require '[sci.nrepl.browser-server :as browser])
+(require '[babashka.nrepl.server :as nrepl])
 
 (comment
 
@@ -45,14 +44,13 @@
 
 (defn sse [handler]
   (fn [req]
-    #_{:clj-kondo/ignore [:unresolved-var]}
     (hk/->sse-response req
       {hk/on-open
        (fn [sse]
          (d*/with-open-sse sse
            (handler req sse)))
        hk/on-close
-       (fn [_sse status]
+       (fn [sse status]
          (println status))
        hk/on-exception
        (fn [e]
@@ -62,10 +60,6 @@
 ;; Handlers
 ;;;;;;;;;;;;;;;;;;;;;;;;;;
 
-(defn hello-page [req]
-  {:status 200
-   :body (render-file "hello-world.html" {})})
-
 (defn index [req]
   {:status 200
    :body (render-file "index.html" {})})
@@ -74,18 +68,17 @@
   {:status 200
    :body (render-file "client.cljs" {})})
 
-(def message "Hello, world!")
+(def message "Hello from server!")
 
 (defn hello-sse [req sse]
   (log/info req)
   (let [d (-> req get-signals :delay int)]
-    (sc/spy)
     (dotimes [i (count message)]
       (d*/patch-elements! sse
         (html [:h1 {:id "message"}
                (subs message 0 (inc i))]))
       (Thread/sleep d))
-    (d*/execute-script! sse "alert('Welcome!')")))
+    (d*/console-log! sse message)))
 
 (import '[java.time LocalTime]
         '[java.time.format DateTimeFormatter])
@@ -98,16 +91,14 @@
 (defn clock-sse [req sse]
   (d*/patch-elements! sse
     (html [:h1 {:id "clock"
-                :data-on-interval__duration.10s (d*/sse-get "/clock-sse")}
+                :data-on-interval__duration.1s (d*/sse-get "/clock-sse")}
            (now)])))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Routes
 ;;;;;;;;;;;;;;;;;;;;;;;;;;
-
 (def routes {"GET /" index
              "GET /client.cljs" js
-             "GET /hello" hello-page
              "GET /hello-sse" (sse #'hello-sse)
              "GET /clock-sse" (sse #'clock-sse)})
 
@@ -117,7 +108,7 @@
 
 (defn -main [& args]
   (let [url (str "http://localhost:" port "/")]
-    (def srv (srv/run-server
+    (def srv (org.httpkit.server/run-server
               (-> (router/router routes)
                   (wrap-params)
                   (hk/wrap-start-responding))
@@ -125,5 +116,8 @@
     (println "serving" url)))
 
 (when (= *file* (System/getProperty "babashka.file"))
+  (browser/start! {:nrepl-port 1333 :websocket-port 1340})
+  (nrepl/start-server! {:host "127.0.0.1" :port 1666})
+  (-main)
   #_(srv)
-  (-main))
+  @(promise))
