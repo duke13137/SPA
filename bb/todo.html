@@ -1,0 +1,86 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <title>Datastar Todos - Babashka</title>
+    <link
+      href="https://unpkg.com/todomvc-app-css@2.4.1/index.css"
+      rel="stylesheet"
+    />
+    <script
+      type="module"
+      src="https://cdn.jsdelivr.net/gh/starfederation/datastar@1.0.0-RC.7/bundles/datastar.js"
+    ></script>
+    <script
+      src="https://cdn.jsdelivr.net/npm/scittle@0.8.31/dist/scittle.js"
+      type="application/javascript"
+    ></script>
+    <script>
+      var SCITTLE_NREPL_WEBSOCKET_PORT = 1340;
+    </script>
+    <script
+      src="https://cdn.jsdelivr.net/npm/scittle@0.8.31/dist/scittle.nrepl.js"
+      type="application/javascript"
+    ></script>
+    <script src="client.cljs" type="application/x-scittle"></script>
+  </head>
+  <body>
+    <section
+      class="todoapp"
+      data-signals:todo="''"
+      data-signals:filter="'all'"
+      data-signals:edittext="''"
+    >
+      <header class="header">
+        <h1>todos</h1>
+        <input
+          class="new-todo"
+          data-bind:todo
+          data-on:keydown="evt.key === 'Enter' && @post('/todos/sse')"
+          placeholder="What needs to be done?"
+          autofocus
+        />
+      </header>
+      <section class="main">
+        <input id="toggle-all" class="toggle-all" type="checkbox" />
+        <label for="toggle-all">Mark all as complete</label>
+      </section>
+      <ul id="todo-list" class="todo-list">
+        {{initial-todos|safe}}
+      </ul>
+      <footer class="footer">
+        {{item-count|safe}}
+        <ul id="filters" class="filters">
+          <li>
+            <a
+              data-on:click="$filter='all'; @get('/todos/sse')"
+              data-class:selected="$filter === 'all'"
+              href="javascript:void(0)"
+              >All</a
+            >
+          </li>
+          <li>
+            <a
+              data-on:click="$filter='active'; @get('/todos/sse')"
+              data-class:selected="$filter === 'active'"
+              href="javascript:void(0)"
+              >Active</a
+            >
+          </li>
+          <li>
+            <a
+              data-on:click="$filter='completed'; @get('/todos/sse')"
+              data-class:selected="$filter === 'completed'"
+              href="javascript:void(0)"
+              >Completed</a
+            >
+          </li>
+        </ul>
+        {{clear-completed|safe}}
+      </footer>
+    </section>
+    <footer class="info">
+      <p>Double-click to edit a todo</p>
+    </footer>
+  </body>
+</html>

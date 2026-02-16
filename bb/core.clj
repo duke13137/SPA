@@ -11,11 +11,11 @@
     [promesa.exec.csp :as sp :refer [go >! <!]]
     [selmer.parser :refer [render-file]]
     [starfederation.datastar.clojure.api :as d*]
-    [starfederation.datastar.clojure.adapter.http-kit2 :as hk]))
+    [starfederation.datastar.clojure.adapter.http-kit2 :as hk]
+    [todoapp]))
 
 (require '[playback.core])
 (require '[portal.console :as log])
-(require '[sc.api :as sc])
 (require '[sci.nrepl.browser-server :as browser])
 (require '[babashka.nrepl.server :as nrepl])
 
@@ -33,28 +33,32 @@
 ;; Helpers
 ;;;;;;;;;;;;;;;;;;;;;;;;;;
 
+(def sse-connections (atom #{}))
+
+(defn use-sse [handler]
+  (fn [req]
+    (hk/->sse-response req
+      {hk/on-open
+       (fn [sse]
+         (swap! sse-connections conj sse)
+         (d*/with-open-sse sse
+           (handler req sse)))
+       hk/on-close
+       (fn [sse status]
+         (swap! sse-connections disj sse)
+         (println status))
+       hk/on-exception
+       (fn [e]
+         (println e))})))
+
+(defn html [h]
+  (str (h/html h)))
+
 (defn parse-json [s]
   (json/parse-string s true))
 
 (defn get-signals [req]
   (-> req d*/get-signals parse-json))
-
-(defn html [h]
-  (str (h/html h)))
-
-(defn sse [handler]
-  (fn [req]
-    (hk/->sse-response req
-      {hk/on-open
-       (fn [sse]
-         (d*/with-open-sse sse
-           (handler req sse)))
-       hk/on-close
-       (fn [sse status]
-         (println status))
-       hk/on-exception
-       (fn [e]
-         (println e))})))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Handlers
@@ -70,7 +74,7 @@
 
 (def message "Hello from server!")
 
-(defn hello-sse [req sse]
+(defn update-hello [req sse]
   (log/info req)
   (let [d (-> req get-signals :delay int)]
     (dotimes [i (count message)]
@@ -88,7 +92,7 @@
 (defn now []
   (.format (LocalTime/now) dt-format))
 
-(defn clock-sse [req sse]
+(defn update-clock [req sse]
   (d*/patch-elements! sse
     (html [:h1 {:id "clock"
                 :data-on-interval__duration.1s (d*/sse-get "/clock-sse")}
@@ -97,10 +101,11 @@
 ;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Routes
 ;;;;;;;;;;;;;;;;;;;;;;;;;;
-(def routes {"GET /" index
-             "GET /client.cljs" js
-             "GET /hello-sse" (sse #'hello-sse)
-             "GET /clock-sse" (sse #'clock-sse)})
+(def routes (merge {"GET /" index
+                    "GET /client.cljs" js
+                    "GET /hello-sse" (use-sse #'update-hello)
+                    "GET /clock-sse" (use-sse #'update-clock)}
+                   todoapp/routes))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Server
