@@ -1,0 +1,432 @@
+[
+  {
+    "_comment": "=== ROLES ===",
+    "_scenario": "Trust chain: CICDPipelineRole -> DeploymentRole -> OrchestrationRole, AdminRole -> OrchestrationRole + CrossAccountAuditRole"
+  },
+
+  {
+    "version": "1.3",
+    "accountId": "111111111111",
+    "configurationItemCaptureTime": "2025-12-01T10:00:00.000Z",
+    "configurationItemStatus": "OK",
+    "configurationStateId": "1000001",
+    "arn": "arn:aws:iam::111111111111:role/LambdaExecutionRole",
+    "resourceType": "AWS::IAM::Role",
+    "resourceId": "AROAEXAMPLE00001",
+    "resourceName": "LambdaExecutionRole",
+    "awsRegion": "global",
+    "configuration": {
+      "path": "/",
+      "roleName": "LambdaExecutionRole",
+      "roleId": "AROAEXAMPLE00001",
+      "arn": "arn:aws:iam::111111111111:role/LambdaExecutionRole",
+      "createDate": "2025-01-15T09:00:00.000Z",
+      "maxSessionDuration": 3600,
+      "assumeRolePolicyDocument": {
+        "Version": "2012-10-17",
+        "Statement": [
+          {
+            "Effect": "Allow",
+            "Principal": { "Service": "lambda.amazonaws.com" },
+            "Action": "sts:AssumeRole"
+          }
+        ]
+      },
+      "instanceProfileList": [],
+      "rolePolicyList": [],
+      "attachedManagedPolicies": [
+        {
+          "policyName": "S3ReadPolicy",
+          "policyArn": "arn:aws:iam::111111111111:policy/S3ReadPolicy"
+        },
+        {
+          "policyName": "AWSLambdaBasicExecutionRole",
+          "policyArn": "arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"
+        }
+      ],
+      "roleLastUsed": {
+        "lastUsedDate": "2025-11-30T08:00:00.000Z",
+        "region": "us-east-1"
+      }
+    }
+  },
+
+  {
+    "version": "1.3",
+    "accountId": "111111111111",
+    "configurationItemCaptureTime": "2025-12-01T10:00:00.000Z",
+    "configurationItemStatus": "OK",
+    "configurationStateId": "1000002",
+    "arn": "arn:aws:iam::111111111111:role/CICDPipelineRole",
+    "resourceType": "AWS::IAM::Role",
+    "resourceId": "AROAEXAMPLE00002",
+    "resourceName": "CICDPipelineRole",
+    "awsRegion": "global",
+    "configuration": {
+      "path": "/",
+      "roleName": "CICDPipelineRole",
+      "roleId": "AROAEXAMPLE00002",
+      "arn": "arn:aws:iam::111111111111:role/CICDPipelineRole",
+      "createDate": "2025-02-01T12:00:00.000Z",
+      "maxSessionDuration": 7200,
+      "assumeRolePolicyDocument": {
+        "Version": "2012-10-17",
+        "Statement": [
+          {
+            "Effect": "Allow",
+            "Principal": { "Service": "codebuild.amazonaws.com" },
+            "Action": "sts:AssumeRole"
+          }
+        ]
+      },
+      "instanceProfileList": [],
+      "rolePolicyList": [],
+      "attachedManagedPolicies": [
+        {
+          "policyName": "S3ReadPolicy",
+          "policyArn": "arn:aws:iam::111111111111:policy/S3ReadPolicy"
+        }
+      ]
+    }
+  },
+
+  {
+    "version": "1.3",
+    "accountId": "111111111111",
+    "configurationItemCaptureTime": "2025-12-01T10:00:00.000Z",
+    "configurationItemStatus": "OK",
+    "configurationStateId": "1000003",
+    "arn": "arn:aws:iam::111111111111:role/DeploymentRole",
+    "resourceType": "AWS::IAM::Role",
+    "resourceId": "AROAEXAMPLE00003",
+    "resourceName": "DeploymentRole",
+    "awsRegion": "global",
+    "configuration": {
+      "path": "/",
+      "roleName": "DeploymentRole",
+      "roleId": "AROAEXAMPLE00003",
+      "arn": "arn:aws:iam::111111111111:role/DeploymentRole",
+      "createDate": "2025-03-01T08:00:00.000Z",
+      "maxSessionDuration": 3600,
+      "assumeRolePolicyDocument": {
+        "Version": "2012-10-17",
+        "Statement": [
+          {
+            "Sid": "AllowCICDAssume",
+            "Effect": "Allow",
+            "Principal": {
+              "AWS": "arn:aws:iam::111111111111:role/CICDPipelineRole"
+            },
+            "Action": "sts:AssumeRole"
+          }
+        ]
+      },
+      "instanceProfileList": [],
+      "rolePolicyList": [
+        {
+          "policyName": "InlineDeployAccess",
+          "policyDocument": {
+            "Version": "2012-10-17",
+            "Statement": [
+              {
+                "Effect": "Allow",
+                "Action": [
+                  "cloudformation:CreateStack",
+                  "cloudformation:UpdateStack",
+                  "cloudformation:DeleteStack",
+                  "cloudformation:DescribeStacks"
+                ],
+                "Resource": "arn:aws:cloudformation:us-east-1:111111111111:stack/*"
+              }
+            ]
+          }
+        }
+      ],
+      "attachedManagedPolicies": [
+        {
+          "policyName": "S3ReadPolicy",
+          "policyArn": "arn:aws:iam::111111111111:policy/S3ReadPolicy"
+        },
+        {
+          "policyName": "CloudFormationDeployPolicy",
+          "policyArn": "arn:aws:iam::111111111111:policy/CloudFormationDeployPolicy"
+        }
+      ]
+    }
+  },
+
+  {
+    "version": "1.3",
+    "accountId": "111111111111",
+    "configurationItemCaptureTime": "2025-12-01T10:00:00.000Z",
+    "configurationItemStatus": "OK",
+    "configurationStateId": "1000004",
+    "arn": "arn:aws:iam::111111111111:role/OrchestrationRole",
+    "resourceType": "AWS::IAM::Role",
+    "resourceId": "AROAEXAMPLE00004",
+    "resourceName": "OrchestrationRole",
+    "awsRegion": "global",
+    "configuration": {
+      "path": "/",
+      "roleName": "OrchestrationRole",
+      "roleId": "AROAEXAMPLE00004",
+      "arn": "arn:aws:iam::111111111111:role/OrchestrationRole",
+      "createDate": "2025-03-15T10:00:00.000Z",
+      "maxSessionDuration": 3600,
+      "assumeRolePolicyDocument": {
+        "Version": "2012-10-17",
+        "Statement": [
+          {
+            "Sid": "AllowDeployAndAdminAssume",
+            "Effect": "Allow",
+            "Principal": {
+              "AWS": [
+                "arn:aws:iam::111111111111:role/DeploymentRole",
+                "arn:aws:iam::111111111111:role/AdminRole"
+              ]
+            },
+            "Action": "sts:AssumeRole"
+          }
+        ]
+      },
+      "instanceProfileList": [],
+      "rolePolicyList": [],
+      "attachedManagedPolicies": [
+        {
+          "policyName": "CloudFormationDeployPolicy",
+          "policyArn": "arn:aws:iam::111111111111:policy/CloudFormationDeployPolicy"
+        }
+      ]
+    }
+  },
+
+  {
+    "version": "1.3",
+    "accountId": "111111111111",
+    "configurationItemCaptureTime": "2025-12-01T10:00:00.000Z",
+    "configurationItemStatus": "OK",
+    "configurationStateId": "1000005",
+    "arn": "arn:aws:iam::111111111111:role/AdminRole",
+    "resourceType": "AWS::IAM::Role",
+    "resourceId": "AROAEXAMPLE00005",
+    "resourceName": "AdminRole",
+    "awsRegion": "global",
+    "configuration": {
+      "path": "/",
+      "roleName": "AdminRole",
+      "roleId": "AROAEXAMPLE00005",
+      "arn": "arn:aws:iam::111111111111:role/AdminRole",
+      "createDate": "2025-01-01T00:00:00.000Z",
+      "maxSessionDuration": 14400,
+      "assumeRolePolicyDocument": {
+        "Version": "2012-10-17",
+        "Statement": [
+          {
+            "Effect": "Allow",
+            "Principal": { "Service": "sso.amazonaws.com" },
+            "Action": "sts:AssumeRole"
+          }
+        ]
+      },
+      "instanceProfileList": [],
+      "rolePolicyList": [
+        {
+          "policyName": "InlineAssumeRoleAccess",
+          "policyDocument": {
+            "Version": "2012-10-17",
+            "Statement": [
+              {
+                "Sid": "AllowAssumeDeployRoles",
+                "Effect": "Allow",
+                "Action": "sts:AssumeRole",
+                "Resource": [
+                  "arn:aws:iam::111111111111:role/OrchestrationRole",
+                  "arn:aws:iam::222222222222:role/CrossAccountAuditRole"
+                ]
+              }
+            ]
+          }
+        }
+      ],
+      "attachedManagedPolicies": [
+        {
+          "policyName": "S3ReadPolicy",
+          "policyArn": "arn:aws:iam::111111111111:policy/S3ReadPolicy"
+        }
+      ]
+    }
+  },
+
+  {
+    "version": "1.3",
+    "accountId": "222222222222",
+    "configurationItemCaptureTime": "2025-12-01T10:00:00.000Z",
+    "configurationItemStatus": "OK",
+    "configurationStateId": "2000001",
+    "arn": "arn:aws:iam::222222222222:role/CrossAccountAuditRole",
+    "resourceType": "AWS::IAM::Role",
+    "resourceId": "AROAEXAMPLE00006",
+    "resourceName": "CrossAccountAuditRole",
+    "awsRegion": "global",
+    "configuration": {
+      "path": "/",
+      "roleName": "CrossAccountAuditRole",
+      "roleId": "AROAEXAMPLE00006",
+      "arn": "arn:aws:iam::222222222222:role/CrossAccountAuditRole",
+      "createDate": "2025-04-01T14:00:00.000Z",
+      "maxSessionDuration": 3600,
+      "assumeRolePolicyDocument": {
+        "Version": "2012-10-17",
+        "Statement": [
+          {
+            "Sid": "AllowCrossAccountAdmin",
+            "Effect": "Allow",
+            "Principal": {
+              "AWS": "arn:aws:iam::111111111111:role/AdminRole"
+            },
+            "Action": "sts:AssumeRole",
+            "Condition": {
+              "Bool": { "aws:MultiFactorAuthPresent": "true" }
+            }
+          }
+        ]
+      },
+      "instanceProfileList": [],
+      "rolePolicyList": [],
+      "attachedManagedPolicies": [
+        {
+          "policyName": "ReadOnlyAccess",
+          "policyArn": "arn:aws:iam::aws:policy/ReadOnlyAccess"
+        }
+      ]
+    }
+  },
+
+  {
+    "_comment": "=== MANAGED POLICIES ==="
+  },
+
+  {
+    "version": "1.3",
+    "accountId": "111111111111",
+    "configurationItemCaptureTime": "2025-12-01T10:00:00.000Z",
+    "configurationItemStatus": "OK",
+    "configurationStateId": "1000010",
+    "arn": "arn:aws:iam::111111111111:policy/S3ReadPolicy",
+    "resourceType": "AWS::IAM::Policy",
+    "resourceId": "ANPAEXAMPLE00001",
+    "resourceName": "S3ReadPolicy",
+    "awsRegion": "global",
+    "configuration": {
+      "policyName": "S3ReadPolicy",
+      "policyId": "ANPAEXAMPLE00001",
+      "arn": "arn:aws:iam::111111111111:policy/S3ReadPolicy",
+      "path": "/",
+      "defaultVersionId": "v1",
+      "attachmentCount": 4,
+      "isAttachable": true,
+      "createDate": "2025-01-10T08:00:00.000Z",
+      "updateDate": "2025-01-10T08:00:00.000Z",
+      "policyVersionList": [
+        {
+          "document": {
+            "Version": "2012-10-17",
+            "Statement": [
+              {
+                "Sid": "AllowS3Read",
+                "Effect": "Allow",
+                "Action": [
+                  "s3:GetObject",
+                  "s3:ListBucket",
+                  "s3:GetBucketLocation"
+                ],
+                "Resource": [
+                  "arn:aws:s3:::my-deploy-bucket",
+                  "arn:aws:s3:::my-deploy-bucket/*"
+                ]
+              }
+            ]
+          },
+          "versionId": "v1",
+          "isDefaultVersion": true,
+          "createDate": "2025-01-10T08:00:00.000Z"
+        }
+      ]
+    }
+  },
+
+  {
+    "version": "1.3",
+    "accountId": "111111111111",
+    "configurationItemCaptureTime": "2025-12-01T10:00:00.000Z",
+    "configurationItemStatus": "OK",
+    "configurationStateId": "1000011",
+    "arn": "arn:aws:iam::111111111111:policy/CloudFormationDeployPolicy",
+    "resourceType": "AWS::IAM::Policy",
+    "resourceId": "ANPAEXAMPLE00002",
+    "resourceName": "CloudFormationDeployPolicy",
+    "awsRegion": "global",
+    "configuration": {
+      "policyName": "CloudFormationDeployPolicy",
+      "policyId": "ANPAEXAMPLE00002",
+      "arn": "arn:aws:iam::111111111111:policy/CloudFormationDeployPolicy",
+      "path": "/",
+      "defaultVersionId": "v2",
+      "attachmentCount": 2,
+      "isAttachable": true,
+      "createDate": "2025-02-01T08:00:00.000Z",
+      "updateDate": "2025-06-15T12:00:00.000Z",
+      "policyVersionList": [
+        {
+          "document": {
+            "Version": "2012-10-17",
+            "Statement": [
+              {
+                "Sid": "AllowCFNDeploy",
+                "Effect": "Allow",
+                "Action": [
+                  "cloudformation:CreateStack",
+                  "cloudformation:UpdateStack",
+                  "cloudformation:DeleteStack",
+                  "cloudformation:DescribeStacks",
+                  "cloudformation:DescribeStackEvents",
+                  "cloudformation:GetTemplate"
+                ],
+                "Resource": "*"
+              },
+              {
+                "Sid": "AllowIAMPassRole",
+                "Effect": "Allow",
+                "Action": "iam:PassRole",
+                "Resource": "arn:aws:iam::111111111111:role/*",
+                "Condition": {
+                  "StringEquals": {
+                    "iam:PassedToService": "cloudformation.amazonaws.com"
+                  }
+                }
+              }
+            ]
+          },
+          "versionId": "v2",
+          "isDefaultVersion": true,
+          "createDate": "2025-06-15T12:00:00.000Z"
+        },
+        {
+          "document": {
+            "Version": "2012-10-17",
+            "Statement": [
+              {
+                "Effect": "Allow",
+                "Action": "cloudformation:*",
+                "Resource": "*"
+              }
+            ]
+          },
+          "versionId": "v1",
+          "isDefaultVersion": false,
+          "createDate": "2025-02-01T08:00:00.000Z"
+        }
+      ]
+    }
+  }
+]
