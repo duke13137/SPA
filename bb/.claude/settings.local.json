@@ -1,0 +1,70 @@
+{
+  "permissions": {
+    "allow": [
+      "mcp__plugin_github_github__get_latest_release",
+      "WebFetch(domain:data-star.dev)",
+      "mcp__plugin_github_github__get_file_contents",
+      "WebFetch(domain:raw.githubusercontent.com)",
+      "WebFetch(domain:github.com)",
+      "mcp__plugin_context7_context7__query-docs",
+      "WebSearch",
+      "WebFetch(domain:datalevin.readthedocs.io)",
+      "WebFetch(domain:clojars.org)",
+      "WebFetch(domain:juji.io)",
+      "WebFetch(domain:cljdoc.org)",
+      "WebFetch(domain:clojureverse.org)",
+      "WebFetch(domain:docs.basilisp.org)",
+      "Bash(brepl:*)",
+      "WebFetch(domain:basilisp.readthedocs.io)",
+      "WebFetch(domain:clojure.org)",
+      "mcp__plugin_context7_context7__resolve-library-id",
+      "WebFetch(domain:docs.datomic.com)"
+    ]
+  },
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Edit|Write|Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "brepl hook validate"
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "brepl hook eval"
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "brepl hook stop"
+          }
+        ]
+      }
+    ],
+    "SessionEnd": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "brepl hook session-end"
+          }
+        ]
+      }
+    ]
+  }
+}

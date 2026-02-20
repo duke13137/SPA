@@ -1,0 +1,15 @@
+{
+  "go": {
+    "command": "clojure-lsp",
+    "args": [],
+    "extensionToLanguage": {
+      ".clj": "clojure",
+      ".cljc": "clojure",
+      ".cljs": "clojure"
+    },
+    "transport": "stdio",
+    "initializationOptions": {},
+    "settings": {},
+    "maxRestarts": 3
+  }
+}

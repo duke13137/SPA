@@ -1,0 +1,12 @@
+{
+  "name": "clojure-lsp",
+  "version": "0.1.0",
+  "description": "Clojure language server",
+  "author": {
+    "name": "duke",
+    "email": "duke@clojure.com"
+  },
+  "repository": "https://clojure-lsp.io/",
+  "license": "BSD-3-Clause",
+  "keywords": ["clojure", "clj", "lsp", "language-server"]
+}

@@ -1,10 +1,9 @@
 (ns iam-oracle
   (:require
-   [cheshire.core :as json]))
-
-(require '[babashka.pods :as pods])
-(pods/load-pod 'huahaiy/datalevin "0.10.5")
-(require '[pod.huahaiy.datalevin :as d])
+   [clojure.string :as str]
+   [cheshire.core :as json]
+   #?(:bb  [pod.huahaiy.datalevin :as d]
+      :clj [datalevin.core :as d])))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Schema
@@ -65,7 +64,27 @@
    :stmt/principal-type {:db/valueType :db.type/string}   ; "Service" | "AWS" | "Federated"
    :stmt/principals     {:db/valueType   :db.type/string
                          :db/cardinality :db.cardinality/many}
-   :stmt/condition      {:db/valueType :db.type/string}}) ; serialized JSON
+   :stmt/condition      {:db/valueType :db.type/string}   ; serialized JSON
+
+   ;; ── IAM Action (from servicespec) ────────────────────────────────────
+   :action/id            {:db/unique    :db.unique/identity
+                          :db/valueType :db.type/string}
+   :action/service       {:db/valueType :db.type/string}
+   :action/name          {:db/valueType :db.type/string}
+   :action/verb          {:db/valueType :db.type/string}
+   ;; "Read"|"List"|"Write"|"PermissionManagement"|"Tagging"
+   ;; Single string avoids the pod boolean-index bug.
+   :action/access-level  {:db/valueType :db.type/string}
+   :action/resource-types {:db/valueType   :db.type/ref
+                           :db/cardinality :db.cardinality/many}
+
+   ;; ── Resource Type (from servicespec) ─────────────────────────────────
+   :resource-type/id              {:db/unique    :db.unique/identity
+                                   :db/valueType :db.type/string}
+   :resource-type/service         {:db/valueType :db.type/string}
+   :resource-type/name            {:db/valueType :db.type/string}
+   :resource-type/arn-format      {:db/valueType :db.type/string}
+   :resource-type/resource-prefix {:db/valueType :db.type/string}})
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Connection
@@ -273,6 +292,75 @@
     (d/transact! conn [[:db/retractEntity eid]])))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;
+;; Servicespec ingest
+;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+(defn- derive-access-level
+  [{:keys [IsList IsWrite IsPermissionManagement IsTaggingOnly]}]
+  (cond
+    IsPermissionManagement "PermissionManagement"
+    IsTaggingOnly          "Tagging"
+    IsWrite                "Write"
+    IsList                 "List"
+    :else                  "Read"))
+
+(defn- extract-verb [action-name]
+  (second (re-find #"^([A-Z][a-z]+)" action-name)))
+
+(defn- extract-resource-prefix
+  "Literal prefix of the resource segment before the first ${...} variable.
+   e.g. 'role/' from 'arn:...:role/${RoleName}',
+        'function:' from 'arn:...:function:${FunctionName}',
+        '' from 'arn:...:${BucketName}'."
+  [arn-format]
+  (let [parts        (str/split arn-format #":" 6)
+        resource-seg (nth parts 5 "")]
+    (or (second (re-find #"^([^$]*)" resource-seg)) "")))
+
+(defn load-servicespec!
+  "Load a servicespec JSON file into the database. Idempotent — upserts via
+   :action/id and :resource-type/id identity attributes.
+   Returns the count of actions loaded."
+  [path service-name]
+  (let [spec (json/parse-string (slurp path) true)
+        rt-txs (mapv (fn [r]
+                       (let [arn-fmt (first (:ARNFormats r))]
+                         {:resource-type/id              (str service-name ":" (:Name r))
+                          :resource-type/service         service-name
+                          :resource-type/name            (:Name r)
+                          :resource-type/arn-format      arn-fmt
+                          :resource-type/resource-prefix (extract-resource-prefix arn-fmt)}))
+                     (:Resources spec))
+        action-txs (mapv (fn [a]
+                           (let [action-name (:Name a)
+                                 props       (get-in a [:Annotations :Properties])
+                                 res-refs    (when-let [rs (seq (:Resources a))]
+                                               (mapv #(vector :resource-type/id
+                                                              (str service-name ":" (:Name %)))
+                                                     rs))]
+                             (cond-> {:action/id           (str service-name ":" action-name)
+                                      :action/service      service-name
+                                      :action/name         action-name
+                                      :action/verb         (extract-verb action-name)
+                                      :action/access-level (derive-access-level props)}
+                               (seq res-refs) (assoc :action/resource-types res-refs))))
+                         (:Actions spec))]
+    (d/transact! conn (into rt-txs action-txs))
+    (count action-txs)))
+
+(def ^:private default-services
+  ["s3" "ec2" "lambda" "iam" "logs" "sts" "dynamodb" "secretsmanager"])
+
+(defn load-all-servicespecs!
+  "Load servicespec files for the given (or default 8) services.
+   specs-dir should end with a slash."
+  ([specs-dir] (load-all-servicespecs! specs-dir default-services))
+  ([specs-dir services]
+   (doseq [svc services]
+     (let [n (load-servicespec! (str specs-dir svc ".json") svc)]
+       (println (str "  " svc ": " n " actions"))))))
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Read API
 ;;;;;;;;;;;;;;;;;;;;;;;;;;
 
@@ -475,3 +563,277 @@
          [?s :stmt/actions ?action]
          [(clojure.string/starts-with? ?action ?prefix)]]
        (d/db conn) action-prefix))
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;
+;; Servicespec rules
+;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+(def ^:private action-rules
+  '[;; readonly = Read or List (two heads = logical OR)
+    [(readonly-action ?e)
+     [?e :action/access-level "Read"]]
+    [(readonly-action ?e)
+     [?e :action/access-level "List"]]
+    ;; actions by service + verb
+    [(verb-actions ?svc ?verb ?e)
+     [?e :action/service ?svc]
+     [?e :action/verb ?verb]]])
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;
+;; Servicespec queries
+;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+(defn valid-action?
+  "Check if an action string exists in the servicespec (or is a wildcard).
+   Returns truthy if valid."
+  [action-str]
+  (or (= action-str "*")
+      (and (string? action-str)
+           (re-matches #"[a-z0-9-]+:\*" action-str))
+      (some? (d/q '[:find ?e . :in $ ?id :where [?e :action/id ?id]]
+                   (d/db conn) action-str))))
+
+(defn invalid-actions
+  "Return actions from the collection that don't exist in the servicespec."
+  [actions]
+  (vec (remove valid-action? actions)))
+
+(defn expand-action-pattern
+  "Expand a wildcard action pattern to matching action IDs.
+   Supports: \"*\", \"s3:*\", \"s3:Get*\", \"s3:GetObj*\", \"s3:GetObject\"."
+  [pattern]
+  (let [db (d/db conn)]
+    (cond
+      (= pattern "*")
+      (d/q '[:find [?id ...] :where [_ :action/id ?id]] db)
+
+      ;; "s3:*" — all actions for a service
+      (re-matches #"[a-z0-9-]+:\*" pattern)
+      (let [svc (first (str/split pattern #":"))]
+        (d/q '[:find [?id ...] :in $ ?svc
+               :where [?e :action/service ?svc] [?e :action/id ?id]]
+             db svc))
+
+      ;; "s3:Get*" — verb-level wildcard (indexed via :action/verb)
+      (re-matches #"[a-z0-9-]+:[A-Z][a-z]+\*" pattern)
+      (let [[svc action-pat] (str/split pattern #":" 2)
+            verb (str/replace action-pat "*" "")]
+        (d/q '[:find [?id ...] :in $ % ?svc ?verb
+               :where (verb-actions ?svc ?verb ?e) [?e :action/id ?id]]
+             db action-rules svc verb))
+
+      ;; "s3:GetObj*" — sub-verb prefix (predicate, full ns required for pod)
+      (str/ends-with? pattern "*")
+      (let [[svc action-pat] (str/split pattern #":" 2)
+            prefix (str/replace action-pat #"\*$" "")]
+        (d/q '[:find [?id ...] :in $ ?svc ?prefix
+               :where [?e :action/service ?svc]
+                      [?e :action/name ?name]
+                      [(clojure.string/starts-with? ?name ?prefix)]
+                      [?e :action/id ?id]]
+             db svc prefix))
+
+      ;; literal action name
+      :else
+      (if (d/q '[:find ?e . :in $ ?id :where [?e :action/id ?id]] db pattern)
+        [pattern]
+        []))))
+
+(defn action-pattern-readonly?
+  "Check if ALL actions matching a wildcard pattern are readonly (Read or List).
+   Returns true/false, or nil if no actions match."
+  [pattern]
+  (let [ids (expand-action-pattern pattern)]
+    (when (seq ids)
+      (let [levels (d/q '[:find [?al ...]
+                          :in $ [?id ...]
+                          :where [?e :action/id ?id]
+                                 [?e :action/access-level ?al]]
+                        (d/db conn) ids)]
+        (every? #{"Read" "List"} levels)))))
+
+(defn- normalize-level
+  "Merge Tagging into Write for output grouping."
+  [al]
+  (if (= al "Tagging") "Write" al))
+
+(defn compress-actions
+  "Compress a list of action IDs into a map of access-level to action list,
+   collapsing actions that share service + verb + access-level into Verb* wildcards.
+   Tagging is merged into Write. Only compresses when ALL input actions for that
+   service+verb have the same normalized access level."
+  [action-ids]
+  (let [rows (->> (d/q '[:find ?svc ?verb ?al ?id
+                         :in $ [?id ...]
+                         :where
+                         [?e :action/id ?id]
+                         [?e :action/service ?svc]
+                         [?e :action/verb ?verb]
+                         [?e :action/access-level ?al]]
+                       (d/db conn) action-ids)
+                  (mapv (fn [[svc verb al id]]
+                          [svc verb (normalize-level al) id])))
+        ;; Which [svc verb] pairs have a single access level across all input actions?
+        safe-to-compress
+        (->> rows
+             (group-by (fn [[svc verb _ _]] [svc verb]))
+             (into #{}
+                   (comp (filter (fn [[_ grp]]
+                                   (= 1 (count (into #{} (map #(nth % 2)) grp)))))
+                         (map key))))]
+    (->> rows
+         (group-by (fn [[_ _ al _]] al))
+         (into {}
+               (map (fn [[al members]]
+                      [al (->> members
+                                (group-by (fn [[svc verb _ _]] [svc verb]))
+                                (mapcat (fn [[[svc verb :as k] grp]]
+                                          (if (and (> (count grp) 1)
+                                                   (contains? safe-to-compress k))
+                                            [(str svc ":" verb "*")]
+                                            (mapv #(nth % 3) grp))))
+                                vec)]))))))
+
+(defn- title-case
+  "\"secretsmanager\" → \"Secretsmanager\"."
+  [s]
+  (str (str/upper-case (subs s 0 1)) (subs s 1)))
+
+(defn- svc-of
+  "\"s3:GetObject\" → \"s3\", \"arn:aws:s3:::bucket\" → \"s3\", \"*\" → nil."
+  [s]
+  (cond
+    (str/starts-with? s "arn:") (nth (str/split s #":" 4) 2 nil)
+    (str/includes? s ":")       (subs s 0 (str/index-of s ":"))
+    :else                       nil))
+
+(defn- resolve-statement
+  "Resolve input to a statement map with string keys.
+   Accepts JSON string or :stmt/id string for Datalevin lookup."
+  [stmt-or-json]
+  (if (and (string? stmt-or-json)
+           (not (str/starts-with? (str/trim stmt-or-json) "{")))
+    (let [ent (d/pull (d/db conn) '[*] [:stmt/id stmt-or-json])]
+      (when ent
+        (cond-> {"Effect"   (:stmt/effect ent)
+                 "Action"   (vec (:stmt/actions ent))
+                 "Resource" (vec (:stmt/resources ent))}
+          (:stmt/sid ent)        (assoc "Sid" (:stmt/sid ent))
+          (:stmt/condition ent)  (assoc "Condition"
+                                        (json/parse-string (:stmt/condition ent)))
+          (:stmt/principals ent) (assoc "Principal"
+                                        {(:stmt/principal-type ent)
+                                         (vec (:stmt/principals ent))}))))
+    (json/parse-string stmt-or-json)))
+
+(defn- classify-wildcard
+  "Return the access level for a wildcard action pattern, or \"Mixed\"/\"Unknown\"."
+  [wc]
+  (if (= wc "*")
+    "Mixed"
+    (let [expanded (expand-action-pattern wc)]
+      (if (empty? expanded)
+        "Unknown"
+        (let [levels (into #{} (map normalize-level)
+                           (d/q '[:find [?al ...]
+                                  :in $ [?id ...]
+                                  :where [?e :action/id ?id]
+                                         [?e :action/access-level ?al]]
+                                (d/db conn) expanded))]
+          (if (= 1 (count levels)) (first levels) "Mixed"))))))
+
+(defn split-statement-by-access-level
+  "Split a single-service policy statement into statements grouped by access level.
+   Input: JSON string or :stmt/id for Datalevin lookup.
+   Returns input as singleton list when:
+   - Actions+resources span multiple services
+   - Statement uses NotAction or NotResource (ambiguous semantics)
+   Otherwise compresses actions within each level and generates
+   Sid as {OriginalSid}{Service}{AccessLevel}."
+  [stmt-or-json]
+  (let [stmt       (resolve-statement stmt-or-json)
+        _          (assert stmt "Could not resolve statement")
+        ;; Bail on NotAction / NotResource — semantics are inverted
+        not-action?   (contains? stmt "NotAction")
+        not-resource? (contains? stmt "NotResource")
+        actions    (ensure-vec (or (get stmt "Action") (get stmt "NotAction")))
+        resources  (ensure-vec (or (get stmt "Resource") (get stmt "NotResource")))
+        svcs       (->> (concat actions resources) (keep svc-of) (into #{}))]
+    (if (or not-action? not-resource? (> (count svcs) 1))
+      ;; Unsplittable → return as-is
+      [stmt]
+      ;; Single-service → split by access level
+      (let [orig-sid    (get stmt "Sid" "")
+            base-fields (dissoc stmt "Action" "Sid")
+
+            {wildcards true concretes false} (group-by #(str/includes? % "*") actions)
+            known-set   (when (seq concretes)
+                          (into #{} (d/q '[:find [?id ...]
+                                           :in $ [?id ...]
+                                           :where [?e :action/id ?id]]
+                                         (d/db conn) concretes)))
+            {known true unknown false} (group-by #(contains? (or known-set #{}) %) concretes)
+
+            wc-levels (reduce (fn [m wc]
+                                (update m (classify-wildcard wc) (fnil conj []) wc))
+                              {} wildcards)
+            level-map (merge-with into
+                                  (if (seq known) (compress-actions known) {})
+                                  wc-levels
+                                  (when (seq unknown) {"Unknown" unknown}))]
+        (->> level-map
+             (sort-by key)
+             (mapv (fn [[level acts]]
+                     (let [svc (->> acts (keep svc-of) first)]
+                       (assoc base-fields
+                              "Sid"    (str orig-sid (when svc (title-case svc)) level)
+                              "Action" (vec (sort acts)))))))))))
+
+(defn- arn-has-region?
+  "Derive from the ARN format template whether the region segment is non-empty."
+  [arn-format]
+  (not (str/blank? (nth (str/split arn-format #":" 6) 3 ""))))
+
+(defn- arn-has-account?
+  "Derive from the ARN format template whether the account segment is non-empty."
+  [arn-format]
+  (not (str/blank? (nth (str/split arn-format #":" 6) 4 ""))))
+
+(defn valid-resource-for-action?
+  "Check if a resource ARN is structurally valid for a given action.
+   Validates service match, region/account emptiness, and resource prefix."
+  [action-str resource-arn]
+  (or (= resource-arn "*")
+      (let [db      (d/db conn)
+            rt-data (d/q '[:find ?rt-svc ?rt-prefix ?rt-arn-fmt
+                           :in $ ?action-id
+                           :where
+                           [?a :action/id ?action-id]
+                           [?a :action/resource-types ?rt]
+                           [?rt :resource-type/service ?rt-svc]
+                           [?rt :resource-type/resource-prefix ?rt-prefix]
+                           [?rt :resource-type/arn-format ?rt-arn-fmt]]
+                         db action-str)]
+        (if (empty? rt-data)
+          ;; action has no resource type constraint — only * is valid
+          (= resource-arn "*")
+          ;; check if ARN structurally matches any resource type
+          (let [arn-parts    (str/split resource-arn #":" 6)
+                arn-svc      (nth arn-parts 2 "")
+                arn-region   (nth arn-parts 3 "")
+                arn-account  (nth arn-parts 4 "")
+                arn-resource (nth arn-parts 5 "")]
+            (boolean
+             (some (fn [[rt-svc rt-prefix rt-arn-fmt]]
+                     (and
+                      (= arn-svc rt-svc)
+                      (if (arn-has-region? rt-arn-fmt)
+                        (not (str/blank? arn-region))
+                        (str/blank? arn-region))
+                      (if (arn-has-account? rt-arn-fmt)
+                        (not (str/blank? arn-account))
+                        (str/blank? arn-account))
+                      (or (= arn-resource "*")
+                          (str/blank? rt-prefix)
+                          (str/starts-with? arn-resource rt-prefix))))
+                   rt-data)))))))
