@@ -90,7 +90,9 @@
 ;; Connection
 ;;;;;;;;;;;;;;;;;;;;;;;;;;
 
-(def db-path "/tmp/bb-iam-server")
+(def db-path (or (System/getenv "IAM_ORACLE_DB") "/tmp/iam-oracle.dtlv"))
+
+(def data-dir (or (System/getenv "IAM_ORACLE_DATA") "../aws/iam/"))
 
 (defonce conn (d/get-conn db-path schema))
 
@@ -105,6 +107,13 @@
   (cond (nil? x) [] (sequential? x) (vec x) :else [x]))
 
 (defn- uuid-str [] (str (random-uuid)))
+
+(defn- deterministic-id
+  "SHA-256 based deterministic ID from seed strings."
+  [& parts]
+  (let [digest (java.security.MessageDigest/getInstance "SHA-256")
+        bytes  (.digest digest (.getBytes (str/join "|" parts) "UTF-8"))]
+    (str/join (map #(format "%02x" (bit-and % 0xff)) (take 16 bytes)))))
 
 (defn- role-arn? [s]
   (and (string? s) (re-matches #"arn:aws:iam::\d+:role/.+" s)))
@@ -128,41 +137,46 @@
 
 (defn- statements->txdata
   "Convert parsed Statement list to tx-data.
-   Returns [lookup-refs tx-maps] where lookup-refs are [:stmt/id uuid] vectors."
-  [statements]
-  (reduce
-   (fn [[refs txs] stmt]
-     (let [sid         (uuid-str)
-           principal   (:Principal stmt)
-           prin-type   (cond (map? principal)    (-> principal keys first name)
-                             (string? principal) "AWS"
-                             :else               nil)
-           prin-vals   (cond (map? principal)    (mapcat #(if (string? %) [%] (vec %)) (vals principal))
-                             (string? principal) [principal]
-                             :else               [])
-           actions     (ensure-vec (:Action stmt))
-           resources   (ensure-vec (or (:Resource stmt) (:NotResource stmt)))
-           tx          (cond-> {:stmt/id     sid
-                                :stmt/effect (:Effect stmt)
-                                :stmt/actions   actions
-                                :stmt/resources resources}
-                         (:Sid stmt)       (assoc :stmt/sid (:Sid stmt))
-                         (seq prin-vals)   (assoc :stmt/principals prin-vals
-                                                  :stmt/principal-type prin-type)
-                         (:Condition stmt) (assoc :stmt/condition
-                                                  (json/generate-string (:Condition stmt))))]
-       [(conj refs [:stmt/id sid]) (conj txs tx)]))
-   [[] []]
-   statements))
+   Returns [lookup-refs tx-maps] where lookup-refs are [:stmt/id id] vectors.
+   When id-seed is provided, statement IDs are deterministic (seed + index)."
+  ([statements] (statements->txdata statements nil))
+  ([statements id-seed]
+   (let [[refs txs _] (reduce
+                       (fn [[refs txs idx] stmt]
+                         (let [sid         (if id-seed (deterministic-id id-seed "stmt" (str idx)) (uuid-str))
+                               principal   (:Principal stmt)
+                               prin-type   (cond (map? principal)    (-> principal keys first name)
+                                                 (string? principal) "AWS"
+                                                 :else               nil)
+                               prin-vals   (cond (map? principal)    (mapcat #(if (string? %) [%] (vec %)) (vals principal))
+                                                 (string? principal) [principal]
+                                                 :else               [])
+                               actions     (ensure-vec (:Action stmt))
+                               resources   (ensure-vec (or (:Resource stmt) (:NotResource stmt)))
+                               tx          (cond-> {:stmt/id     sid
+                                                    :stmt/effect (:Effect stmt)
+                                                    :stmt/actions   actions
+                                                    :stmt/resources resources}
+                                             (:Sid stmt)       (assoc :stmt/sid (:Sid stmt))
+                                             (seq prin-vals)   (assoc :stmt/principals prin-vals
+                                                                      :stmt/principal-type prin-type)
+                                             (:Condition stmt) (assoc :stmt/condition
+                                                                      (json/generate-string (:Condition stmt))))]
+                           [(conj refs [:stmt/id sid]) (conj txs tx) (inc idx)]))
+                       [[] [] 0]
+                       statements)]
+     [refs txs])))
 
 (defn- policy-doc->txdata
   "Build tx-data for a policy document.
-   Returns [lookup-ref all-tx-maps] where lookup-ref is [:policy/id uuid] or [:policy/arn arn]."
-  [policy-doc policy-name policy-type & [managed-arn]]
+   Returns [lookup-ref all-tx-maps] where lookup-ref is [:policy/id id] or [:policy/arn arn].
+   When id-seed is provided, policy and statement IDs are deterministic."
+  [policy-doc policy-name policy-type & [managed-arn id-seed]]
   (let [doc            (parse-json-field policy-doc)
         stmts          (ensure-vec (:Statement doc))
-        [srefs stmts-tx] (statements->txdata stmts)
-        pid            (uuid-str)
+        policy-seed    (or id-seed (when managed-arn managed-arn))
+        [srefs stmts-tx] (statements->txdata stmts policy-seed)
+        pid            (if policy-seed (deterministic-id policy-seed) (uuid-str))
         policy-tx      (cond-> {:policy/id      pid
                                 :policy/name    policy-name
                                 :policy/type    policy-type
@@ -177,8 +191,11 @@
 ;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 (defn- role-txdata [ci cfg]
-  (let [[trust-ref trust-txs]
-        (policy-doc->txdata (:assumeRolePolicyDocument cfg) "trust" "trust")
+  (let [role-arn (:arn ci)
+
+        [trust-ref trust-txs]
+        (policy-doc->txdata (:assumeRolePolicyDocument cfg) "trust" "trust"
+                            nil (str role-arn "|trust"))
 
         trusted-role-arns
         (extract-trusted-role-arns (:assumeRolePolicyDocument cfg))
@@ -188,7 +205,8 @@
 
         inline-pairs
         (mapv #(policy-doc->txdata (:policyDocument %)
-                                   (:policyName %) "inline")
+                                   (:policyName %) "inline"
+                                   nil (str role-arn "|inline|" (:policyName %)))
               (:rolePolicyList cfg))
 
         attached-txs
@@ -267,22 +285,55 @@
 ;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 (defn ingest!
-  "Upsert a single AWS Config CI. Idempotent — re-ingesting the same ARN updates in place."
+  "Upsert a single AWS Config CI. Idempotent and commutative — ingests the
+   entity first (without trust edges), then:
+   1. Forward: links this role's :role/trusted-by to existing ARNs
+   2. Reverse: finds existing roles whose trust policy principals include
+      this ARN and adds the missing trust edges to them
+   Order of ingestion doesn't matter."
   [ci]
-  (d/transact! conn (ci->txdata ci)))
-
-(defn ingest-many!
-  "Upsert a collection of CIs. Trust relationships (:role/trusted-by) are
-   applied in a second pass to handle forward references between roles."
-  [cis]
-  (let [all-tx   (vec (mapcat ci->txdata cis))
+  (let [all-tx   (ci->txdata ci)
         base-tx  (mapv #(if (map? %) (dissoc % :role/trusted-by) %) all-tx)
         trust-tx (->> all-tx
                       (filter #(and (map? %) (contains? % :role/trusted-by)))
                       (mapv #(select-keys % [:ci/arn :role/trusted-by])))]
+    ;; 1. Base entity
     (d/transact! conn base-tx)
+    ;; 2. Forward: link this role's trusted-by to known ARNs
     (when (seq trust-tx)
-      (d/transact! conn trust-tx))))
+      (let [known-arns (into #{}
+                             (d/q '[:find [?arn ...] :where [?e :ci/arn ?arn]]
+                                  (d/db conn)))
+            filtered   (->> trust-tx
+                            (mapv (fn [tx]
+                                    (update tx :role/trusted-by
+                                            (fn [refs]
+                                              (filterv #(contains? known-arns (second %)) refs)))))
+                            (filterv #(seq (:role/trusted-by %))))]
+        (when (seq filtered)
+          (d/transact! conn filtered))))
+    ;; 3. Reverse: existing roles whose trust policy lists this ARN as principal
+    (when (role-arn? (:arn ci))
+      (let [new-arn   (:arn ci)
+            referrers (d/q '[:find [?rarn ...]
+                             :in $ ?new-arn
+                             :where
+                             [?r :role/trust-policy ?tp]
+                             [?tp :policy/statements ?s]
+                             [?s :stmt/principals ?new-arn]
+                             [?r :ci/arn ?rarn]]
+                           (d/db conn) new-arn)
+            reverse-tx (mapv #(hash-map :ci/arn %
+                                        :role/trusted-by [[:ci/arn new-arn]])
+                             referrers)]
+        (when (seq reverse-tx)
+          (d/transact! conn reverse-tx))))))
+
+(defn ingest-many!
+  "Upsert a collection of CIs. Calls ingest! for each, so trust edges
+   accumulate as entities become available."
+  [cis]
+  (run! ingest! cis))
 
 (defn delete-by-arn!
   "Retract a CI entity by ARN."
@@ -290,6 +341,45 @@
   (when-let [eid (d/q '[:find ?e . :in $ ?arn :where [?e :ci/arn ?arn]]
                       (d/db conn) arn)]
     (d/transact! conn [[:db/retractEntity eid]])))
+
+(defn gc!
+  "Garbage-collect orphaned policy and statement entities not referenced by any role.
+   Returns {:policies n :statements m} counts of retracted entities."
+  []
+  (let [db (d/db conn)
+        ;; All policy eids referenced by some role
+        referenced-policies
+        (into #{}
+              (d/q '[:find [?p ...]
+                     :where
+                     (or [_ :role/attached ?p]
+                         [_ :role/inline ?p]
+                         [_ :role/trust-policy ?p])]
+                   db))
+        ;; All policy eids in DB
+        all-policies
+        (into #{}
+              (d/q '[:find [?p ...]
+                     :where [?p :policy/id _]]
+                   db))
+        orphan-policies (remove referenced-policies all-policies)
+        ;; All statement eids referenced by some policy
+        referenced-stmts
+        (into #{}
+              (d/q '[:find [?s ...]
+                     :where [_ :policy/statements ?s]]
+                   db))
+        all-stmts
+        (into #{}
+              (d/q '[:find [?s ...]
+                     :where [?s :stmt/id _]]
+                   db))
+        orphan-stmts (remove referenced-stmts all-stmts)
+        retractions  (into (mapv #(vector :db/retractEntity %) orphan-policies)
+                           (mapv #(vector :db/retractEntity %) orphan-stmts))]
+    (when (seq retractions)
+      (d/transact! conn retractions))
+    {:policies (count orphan-policies) :statements (count orphan-stmts)}))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Servicespec ingest
@@ -305,7 +395,8 @@
     :else                  "Read"))
 
 (defn- extract-verb [action-name]
-  (second (re-find #"^([A-Z][a-z]+)" action-name)))
+  (or (second (re-find #"^([A-Z][a-z]+)" action-name))
+      action-name))
 
 (defn- extract-resource-prefix
   "Literal prefix of the resource segment before the first ${...} variable.
@@ -323,6 +414,7 @@
    Returns the count of actions loaded."
   [path service-name]
   (let [spec (json/parse-string (slurp path) true)
+        known-rts (into #{} (map #(str service-name ":" (:Name %))) (:Resources spec))
         rt-txs (mapv (fn [r]
                        (let [arn-fmt (first (:ARNFormats r))]
                          {:resource-type/id              (str service-name ":" (:Name r))
@@ -335,9 +427,10 @@
                            (let [action-name (:Name a)
                                  props       (get-in a [:Annotations :Properties])
                                  res-refs    (when-let [rs (seq (:Resources a))]
-                                               (mapv #(vector :resource-type/id
-                                                              (str service-name ":" (:Name %)))
-                                                     rs))]
+                                               (->> rs
+                                                    (map #(str service-name ":" (:Name %)))
+                                                    (filter known-rts)
+                                                    (mapv #(vector :resource-type/id %))))]
                              (cond-> {:action/id           (str service-name ":" action-name)
                                       :action/service      service-name
                                       :action/name         action-name
@@ -348,17 +441,17 @@
     (d/transact! conn (into rt-txs action-txs))
     (count action-txs)))
 
-(def ^:private default-services
-  ["s3" "ec2" "lambda" "iam" "logs" "sts" "dynamodb" "secretsmanager"])
-
 (defn load-all-servicespecs!
-  "Load servicespec files for the given (or default 8) services.
-   specs-dir should end with a slash."
-  ([specs-dir] (load-all-servicespecs! specs-dir default-services))
-  ([specs-dir services]
-   (doseq [svc services]
-     (let [n (load-servicespec! (str specs-dir svc ".json") svc)]
-       (println (str "  " svc ": " n " actions"))))))
+  "Load all servicespec JSON files from specs-dir.
+   Derives service name from filename (e.g. 's3.json' → 's3')."
+  [specs-dir]
+  (let [files (->> (file-seq (clojure.java.io/file specs-dir))
+                   (filter #(str/ends-with? (.getName %) ".json"))
+                   (sort-by #(.getName %)))]
+    (doseq [f files]
+      (let [svc (str/replace (.getName f) #"\.json$" "")
+            n   (load-servicespec! (str f) svc)]
+        (println (str "  " svc ": " n " actions"))))))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Read API
@@ -837,3 +930,69 @@
                           (str/blank? rt-prefix)
                           (str/starts-with? arn-resource rt-prefix))))
                    rt-data)))))))
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;
+;; DB initialization
+;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+(defn- db-populated?
+  "Check if the database already has action data loaded."
+  []
+  (some? (d/q '[:find ?e . :where [?e :action/id _]] (d/db conn))))
+
+(defn init-db!
+  "Populate the database with servicespecs and sample CIs if empty.
+   Idempotent — skips loading when data already exists.
+   specs-dir: path to servicespec JSON files (default: ../aws/iam/servicespec/)
+   samples-dir: path to sample CI JSON files (default: ../aws/iam/samples/)"
+  ([] (init-db! (str data-dir "servicespec/") (str data-dir "samples/")))
+  ([specs-dir samples-dir]
+   (if (db-populated?)
+     (println "DB already populated, skipping init.")
+     (do
+       (println "Loading servicespecs...")
+       (load-all-servicespecs! specs-dir)
+       (println "Loading sample CIs...")
+       (let [samples (->> (file-seq (clojure.java.io/file samples-dir))
+                          (filter #(str/ends-with? (.getName %) ".json"))
+                          (sort-by #(.getName %)))]
+         (ingest-many!
+           (mapv (fn [f]
+                   (let [ci (json/parse-string (slurp f) true)]
+                     (println (str "  " (.getName f) " → " (:resourceType ci)))
+                     ci))
+                 samples)))
+       (println "Done. Loaded from" specs-dir "and" samples-dir)))))
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;
+;; CLI wrappers (bb -x)
+;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+(defn- ->json [x]
+  (println (json/generate-string x {:pretty true})))
+
+(defn- read-stdin-jsonl
+  "Read stdin as JSONL (one compact JSON object per line).
+   Use with: jq -c . file.json | bb -x iam-oracle/load-fact"
+  []
+  (->> (line-seq (clojure.java.io/reader *in*))
+       (remove str/blank?)
+       (mapv #(json/parse-string % true))))
+
+(defn load-fact
+  "Ingest AWS Config CI JSON from stdin.
+   cat ci.json | bb -x iam-oracle/load-fact       # single CI
+   cat *.json  | bb -x iam-oracle/load-fact        # JSONL"
+  [_opts]
+  (let [cis (read-stdin-jsonl)]
+    (if (= 1 (count cis))
+      (do (ingest! (first cis))
+          (println "Ingested" (:arn (first cis))))
+      (do (ingest-many! cis)
+          (println "Ingested" (count cis) "CIs")))))
+
+(defn tidy-policy
+  "Split an IAM policy statement JSON by access level.
+   echo '{\"Effect\":\"Allow\",...}' | bb -x iam-oracle/tidy-policy"
+  [_opts]
+  (->json (split-statement-by-access-level (slurp *in*))))

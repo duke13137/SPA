@@ -39,17 +39,29 @@ fd -e clj |& entr -r bb -Dguardrails.enabled=true core.clj
 - To **test http requests**
 
 ```bash
-
 curl 127.0.0.1:3000/
 ```
 
-- To **evalue clojure expressions**
+- To **evaluate clojure expressions** via `brepl`
+
+`brepl` tries ports in order: `.nrepl-port` file, then 9999 (clojure default), then 1666 (bb server). Always prefer `brepl` without `-p` unless targeting a specific REPL.
 
 ```bash
+# auto-detect port (tries .nrepl-port → 9999 → 1666)
+brepl '(println "hello")'
 
-# send to server nrepl
-brepl -p 1666 '(println "server")'
-
-# send to browser nrepl
+# send to browser nrepl (always explicit)
 brepl -p 1333 '(println "browser")'
+```
+
+## Testing
+
+**NEVER use `clj -M:test`.** Run tests with bb or brepl only:
+
+```bash
+# bb direct (runs all tests including property-based via test.check)
+bb -cp . -m iam-oracle-test
+
+# or via Clojure JVM nREPL
+brepl -p 9999 '(require (quote iam-oracle-test) :reload)(clojure.test/run-tests (quote iam-oracle-test))'
 ```

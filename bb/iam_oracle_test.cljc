@@ -14,8 +14,12 @@
 ;;; rebinding sut/conn. The defonce in iam-oracle.cljc runs once on load (opening
 ;;; /tmp/bb-iam-server) but every test body sees a private temp connection.
 
+(def ^:private tmp-dir
+  (let [d (System/getProperty "java.io.tmpdir")]
+    (if (str/ends-with? d "/") d (str d "/"))))
+
 (defmacro with-fresh-db [& body]
-  `(let [path# (str "/tmp/bb-iam-test-" (random-uuid))
+  `(let [path# (str tmp-dir "bb-iam-test-" (random-uuid))
          c#    (d/get-conn path# sut/schema)]
      (try
        (with-redefs [sut/conn c#]
@@ -43,7 +47,7 @@
                  "ecs-tasks.amazonaws.com"]))
 
 (def ^:private real-actions
-  (let [specs-dir "/Users/duke/dev/SPA/aws/iam/servicespec/"
+  (let [specs-dir (str sut/data-dir "servicespec/")
         services  ["s3" "ec2" "lambda" "iam" "logs" "sts" "dynamodb" "secretsmanager"]]
     (->> services
          (mapcat (fn [svc]
@@ -311,10 +315,10 @@
 ;;; ─── Group 5: Servicespec (action validation + wildcard queries) ───────────
 ;;; Uses a single shared DB to avoid LMDB segfault from rapid temp DB churn.
 
-(def ^:private specs-dir "/Users/duke/dev/SPA/aws/iam/servicespec/")
+(def ^:private specs-dir (str sut/data-dir "servicespec/"))
 
 (def ^:private specs-conn
-  (let [path (str "/tmp/bb-iam-specs-" (random-uuid))
+  (let [path (str tmp-dir "bb-iam-specs-" (random-uuid))
         c    (d/get-conn path sut/schema)]
     (with-redefs [sut/conn c]
       (sut/load-servicespec! (str specs-dir "s3.json") "s3")
@@ -577,7 +581,7 @@
                     "Resource" "*"})
           result (sut/split-statement-by-access-level input)]
       (is (= 1 (count result)))
-      (is (= ["s3:GetObject" "kms:Decrypt"] (get (first result) "Action")))))
+      (is (= ["s3:GetObject" "kms:Decrypt"] (get (first result) "Action"))))))
 
 (deftest split-statement-multi-service-via-resource
   ;; Single service in actions but resource ARN is a different service → as-is
@@ -588,7 +592,7 @@
                     "Resource" "arn:aws:kms:us-east-1:123456789012:key/abc"})
           result (sut/split-statement-by-access-level input)]
       (is (= 1 (count result)))
-      (is (= ["s3:GetObject"] (get (first result) "Action")))))))
+      (is (= ["s3:GetObject"] (get (first result) "Action"))))))
 
 (deftest split-statement-preserves-condition
   ;; Condition and Principal carried through to all output statements
@@ -701,7 +705,7 @@
       (is (= 2 (count result)))
       ;; Condition on every output
       (is (every? #(= {"StringEquals" {"kms:ViaService" "s3.us-east-1.amazonaws.com"}}
-                       (get % "Condition"))
+                      (get % "Condition"))
                   result))
       ;; Resource carried through
       (is (every? #(= "arn:aws:kms:us-east-1:123456789012:key/*" (get % "Resource"))
@@ -748,7 +752,332 @@
       (is (= "arn:aws:s3:::protected-bucket/*"
              (get (first result) "NotResource"))))))
 
+;;; ─── Group 9: Sample CI integration tests ──────────────────────────────────
+;;; Uses a shared DB with servicespecs + all sample CIs loaded.
+
+(def ^:private samples-dir (str sut/data-dir "samples/"))
+
+(def ^:private samples-conn
+  (let [path (str tmp-dir "bb-iam-samples-" (random-uuid))
+        c    (d/get-conn path sut/schema)]
+    (with-redefs [sut/conn c]
+      (sut/init-db! specs-dir samples-dir))
+    c))
+
+(defmacro with-samples-db
+  "Run body against the shared servicespec + samples DB."
+  [& body]
+  `(with-redefs [sut/conn samples-conn]
+     ~@body))
+
+;; ── 9a: Hub orchestrator — lots of relations ────────────────────────────────
+
+(deftest hub-orchestrator-has-many-policies
+  (with-samples-db
+    (let [policies (sut/role-all-policies "arn:aws:iam::123456789012:role/HubOrchestratorRole")]
+      ;; 4 inline + 3 attached + 1 trust = 8 policies
+      (is (>= (count policies) 8))
+      (is (contains? (set (map :type policies)) "inline"))
+      (is (contains? (set (map :type policies)) "managed"))
+      (is (contains? (set (map :type policies)) "trust")))))
+
+(deftest hub-orchestrator-has-wide-allowed-actions
+  (with-samples-db
+    (let [actions (sut/role-allowed-actions "arn:aws:iam::123456789012:role/HubOrchestratorRole")
+          svcs    (into #{} (map #(first (str/split % #":"))) actions)]
+      ;; Actions span many services
+      (is (>= (count actions) 40))
+      (is (contains? svcs "s3"))
+      (is (contains? svcs "lambda"))
+      (is (contains? svcs "sqs"))
+      (is (contains? svcs "sns"))
+      (is (contains? svcs "kms"))
+      (is (contains? svcs "secretsmanager"))
+      (is (contains? svcs "dynamodb"))
+      (is (contains? svcs "logs")))))
+
+(deftest hub-orchestrator-attached-policy-graph
+  (with-samples-db
+    (let [attachments (sut/policy-attachments)
+          hub-pols    (->> attachments
+                           (filter #(= (:role-arn %) "arn:aws:iam::123456789012:role/HubOrchestratorRole"))
+                           (map :policy-name)
+                           set)]
+      (is (contains? hub-pols "S3AppBucketReadWrite"))
+      (is (contains? hub-pols "LambdaInvokeAccess"))
+      (is (contains? hub-pols "IAMReadOnlyAudit")))))
+
+(deftest hub-orchestrator-has-permissions-boundary
+  (with-samples-db
+    (let [ent (sut/get-by-arn "arn:aws:iam::123456789012:role/HubOrchestratorRole")]
+      (is (= "arn:aws:iam::123456789012:policy/OrchestratorBoundary"
+             (:role/boundary-arn ent))))))
+
+;; ── 9b: Many-to-many trust graph ────────────────────────────────────────────
+
+(deftest trust-graph-has-expected-edges
+  ;; Hub→A, Hub→B, A→Hub, A→B, B→Hub, B→C, C→A, C→Hub (via workers listing Hub)
+  (with-samples-db
+    (let [edges (->> (sut/trust-graph)
+                     (map (fn [{:keys [assumer target]}] [assumer target]))
+                     set)]
+      ;; Hub can assume A and B (they trust Hub)
+      (is (contains? edges ["HubOrchestratorRole" "WorkerNodeRole-A"]))
+      (is (contains? edges ["HubOrchestratorRole" "WorkerNodeRole-B"]))
+      ;; A can assume Hub and B
+      (is (contains? edges ["WorkerNodeRole-A" "HubOrchestratorRole"]))
+      (is (contains? edges ["WorkerNodeRole-A" "WorkerNodeRole-B"]))
+      ;; B can assume C and Hub (via trust policy listing Hub)
+      ;; Wait — B's trust policy lists A and Hub as trustees, not targets.
+      ;; B→C means C trusts B. B→Hub means Hub trusts B. Let's check.
+      ;; Actually trust-graph returns assumer→target where target trusts assumer.
+      ;; C trusts B → edge [B, C]
+      (is (contains? edges ["WorkerNodeRole-B" "WorkerNodeRole-C"]))
+      ;; C trusts only B, so C→A means A trusts C
+      (is (contains? edges ["WorkerNodeRole-C" "WorkerNodeRole-A"])))))
+
+(deftest trust-graph-cycle-detected-via-chain
+  ;; Hub→A→Hub forms a cycle; trust-chain should show Hub reachable from itself
+  (with-samples-db
+    (let [chain (sut/trust-chain "arn:aws:iam::123456789012:role/HubOrchestratorRole")
+          names (set (map :name chain))]
+      ;; All workers reachable
+      (is (contains? names "WorkerNodeRole-A"))
+      (is (contains? names "WorkerNodeRole-B"))
+      (is (contains? names "WorkerNodeRole-C"))
+      ;; Hub itself reachable (cycle)
+      (is (contains? names "HubOrchestratorRole")))))
+
+(deftest trust-graph-total-edges
+  (with-samples-db
+    (let [edges (sut/trust-graph)]
+      ;; At least 8 edges among Hub + 3 workers
+      (is (>= (count edges) 8)))))
+
+;; ── 9c: One-sided and dangling trust ────────────────────────────────────────
+
+(deftest dangling-external-trust-dropped
+  ;; ExternalTrustDanglingRole trusts 3 external-account roles + 1 deleted internal
+  ;; None exist in DB → no trust edges created
+  (with-samples-db
+    (let [trusted-by (sut/roles-trusted-by
+                       "arn:aws:iam::123456789012:role/ExternalTrustDanglingRole")]
+      (is (empty? trusted-by)))))
+
+(deftest dangling-trust-role-still-queryable
+  ;; The role itself should exist and have its inline policy
+  (with-samples-db
+    (let [ent     (sut/get-by-arn "arn:aws:iam::123456789012:role/ExternalTrustDanglingRole")
+          actions (sut/role-allowed-actions "arn:aws:iam::123456789012:role/ExternalTrustDanglingRole")]
+      (is (some? ent))
+      (is (= "ExternalTrustDanglingRole" (:ci/resource-name ent)))
+      ;; Inline policy has s3 + sns actions
+      (is (>= (count actions) 3)))))
+
+(deftest one-sided-assumer-no-trust-edges
+  ;; OneSidedAssumerRole has sts:AssumeRole in its policy for workers + hub
+  ;; but nobody's trust policy lists it → zero trust edges in either direction
+  (with-samples-db
+    (is (empty? (sut/roles-trusting "arn:aws:iam::123456789012:role/OneSidedAssumerRole")))
+    (is (empty? (sut/roles-trusted-by "arn:aws:iam::123456789012:role/OneSidedAssumerRole")))))
+
+(deftest one-sided-assumer-has-sts-assume-in-actions
+  ;; The sts:AssumeRole actions exist in the policy even though trust is one-sided
+  (with-samples-db
+    (let [actions (set (sut/role-allowed-actions
+                         "arn:aws:iam::123456789012:role/OneSidedAssumerRole"))]
+      (is (contains? actions "sts:AssumeRole")))))
+
+;; ── 9d: Invalid policy actions ──────────────────────────────────────────────
+
+(deftest invalid-policy-misspelled-actions
+  (with-samples-db
+    (let [invalid (sut/invalid-actions
+                    ["s3:GettObject" "s3:PuttObject" "s3:DeletObject" "s3:ListtBucket"
+                     "ec2:DescrbeInstances" "ec2:RunInstancs"
+                     "iam:CerateRole" "iam:DleteRole"])]
+      (is (= 8 (count invalid)))
+      (is (every? string? invalid)))))
+
+(deftest invalid-policy-nonexistent-services
+  (with-samples-db
+    (let [invalid (sut/invalid-actions
+                    ["bogusservice:DoSomething" "bogusservice:DoSomethingElse"
+                     "madeup:ReadWidget" "fakesvc:WriteGadget"])]
+      (is (= 4 (count invalid))))))
+
+(deftest invalid-policy-mixed-valid-and-invalid
+  (with-samples-db
+    (let [all-actions ["s3:GetObject" "s3:GetFakeAction"
+                       "lambda:InvokeFunction" "lambda:FakeInvoke"
+                       "kms:Decrypt" "kms:FakeEncrypt"]
+          invalid     (set (sut/invalid-actions all-actions))]
+      ;; 3 valid, 3 invalid
+      (is (= 3 (count invalid)))
+      (is (contains? invalid "s3:GetFakeAction"))
+      (is (contains? invalid "lambda:FakeInvoke"))
+      (is (contains? invalid "kms:FakeEncrypt"))
+      ;; Valid ones not in invalid set
+      (is (not (contains? invalid "s3:GetObject")))
+      (is (not (contains? invalid "lambda:InvokeFunction")))
+      (is (not (contains? invalid "kms:Decrypt"))))))
+
+(deftest invalid-policy-wrong-case-all-invalid
+  ;; AWS action names are case-sensitive — wrong case = invalid
+  (with-samples-db
+    (let [invalid (sut/invalid-actions
+                    ["S3:GetObject" "IAM:ListRoles" "Lambda:invokefunction" "KMS:decrypt"])]
+      (is (= 4 (count invalid))))))
+
+(deftest invalid-policy-split-puts-unknowns-in-unknown-group
+  ;; split-statement-by-access-level should group invalid actions under "Unknown"
+  ;; Must be single-service to avoid multi-service bail-out
+  (with-samples-db
+    (let [input  (json/generate-string
+                   {"Effect"   "Allow"
+                    "Action"   ["s3:GetObject" "s3:GettObject" "s3:PutObject"
+                                "s3:FakeDelete" "s3:ListtBucket"]
+                    "Resource" "*"})
+          result (sut/split-statement-by-access-level input)
+          unk    (first (filter #(str/includes? (get % "Sid" "") "Unknown") result))]
+      ;; Unknown group should have the 3 invalid actions
+      (is (some? unk))
+      (is (= 3 (count (get unk "Action"))))
+      (is (= #{"s3:GettObject" "s3:FakeDelete" "s3:ListtBucket"}
+             (set (get unk "Action")))))))
+
+;;; ─── Group 10: Commutativity & idempotency proofs ─────────────────────────
+;;; Mathematical properties of ingest!:
+;;;   Idempotent:  I(x) . I(x)   = I(x)
+;;;   Commutative: I(a) . I(b)   = I(b) . I(a)  for all CI pairs
+;;;   N-ary:       I(pi(S))      = I(sigma(S))   for any permutations pi, sigma
+
+(defn- db-snapshot
+  "Extract a normalized, comparable snapshot of all logical facts in the DB.
+   Uses ARNs and names (not entity IDs) so snapshots from different DBs
+   with the same logical content are equal."
+  []
+  (let [db (d/db sut/conn)]
+    {:entities (set (d/q '[:find [?arn ...] :where [?e :ci/arn ?arn]] db))
+     :trust    (set (map (juxt :assumer-arn :target-arn) (sut/trust-graph)))
+     :attached (set (map (juxt :role-arn :policy-arn) (sut/policy-attachments)))
+     :inlines  (set (d/q '[:find ?rarn ?pname
+                            :where
+                            [?r :ci/arn ?rarn]
+                            [?r :role/inline ?p]
+                            [?p :policy/name ?pname]]
+                          db))
+     :actions  (set (d/q '[:find ?arn ?action
+                            :where
+                            [?e :ci/arn ?arn]
+                            (or [?e :role/inline ?p]
+                                [?e :role/attached ?p])
+                            [?p :policy/statements ?s]
+                            [?s :stmt/effect "Allow"]
+                            [?s :stmt/actions ?action]]
+                          db))}))
+
+;; ── Generator: role + managed policy pair ──────────────────────────────────
+
+(def gen-role-with-managed-policy
+  "Generate [role-ci managed-policy-ci] where the role attaches the managed policy."
+  (gen/let [role-arn   gen-role-arn
+            policy-arn gen-policy-arn
+            acct       gen-account-id
+            trust-doc  gen-trust-doc-service
+            policy-doc gen-allow-policy-doc]
+    (let [policy-name (last (str/split policy-arn #"/"))]
+      [(-> (make-role-ci role-arn acct trust-doc)
+           (assoc-in [:configuration :attachedManagedPolicies]
+                     [{:policyArn policy-arn :policyName policy-name}]))
+       (make-managed-policy-ci policy-arn acct policy-doc)])))
+
+;; ── Generator: role-a + role-b + managed-policy triple ─────────────────────
+
+(def gen-triple
+  "Generate [role-a role-b managed-policy-ci] where:
+   - role-b trusts role-a (a can assume b)
+   - role-a has managed-policy attached
+   Tests trust edges + policy attachment commutativity together."
+  (gen/let [[arn-a arn-b] gen-two-role-arns
+            policy-arn    gen-policy-arn
+            acct          gen-account-id
+            policy-doc    gen-allow-policy-doc]
+    (let [policy-name (last (str/split policy-arn #"/"))]
+      [(-> (make-role-ci arn-a acct (trust-doc-for-service "lambda.amazonaws.com"))
+           (assoc-in [:configuration :attachedManagedPolicies]
+                     [{:policyArn policy-arn :policyName policy-name}]))
+       (make-role-ci arn-b acct (trust-doc-for-role arn-a))
+       (make-managed-policy-ci policy-arn acct policy-doc)])))
+
+;; ── 10a: Idempotency ──────────────────────────────────────────────────────
+
+(defspec idempotent-entity-fields 50
+  (prop/for-all [ci gen-role-ci]
+    (with-fresh-db
+      (sut/ingest! ci)
+      (let [snap1 (d/pull (d/db sut/conn) '[*] [:ci/arn (:arn ci)])]
+        (sut/ingest! ci)
+        (= snap1 (d/pull (d/db sut/conn) '[*] [:ci/arn (:arn ci)]))))))
+
+(defspec idempotent-all-relations 30
+  (prop/for-all [[ci-a ci-b ci-p] gen-triple]
+    (let [snap1 (with-fresh-db
+                  (run! sut/ingest! [ci-a ci-b ci-p])
+                  (db-snapshot))
+          snap2 (with-fresh-db
+                  (run! sut/ingest! [ci-a ci-b ci-p])
+                  (run! sut/ingest! [ci-a ci-b ci-p])
+                  (db-snapshot))]
+      (= snap1 snap2))))
+
+;; ── 10b: Pairwise commutativity ───────────────────────────────────────────
+
+(defspec commutative-role-role-trust 50
+  (prop/for-all [[arn-a arn-b] gen-two-role-arns
+                 acct          gen-account-id]
+    (let [ci-a (make-role-ci arn-a acct (trust-doc-for-service "lambda.amazonaws.com"))
+          ci-b (make-role-ci arn-b acct (trust-doc-for-role arn-a))
+          snap-ab (with-fresh-db
+                    (sut/ingest! ci-a)
+                    (sut/ingest! ci-b)
+                    (db-snapshot))
+          snap-ba (with-fresh-db
+                    (sut/ingest! ci-b)
+                    (sut/ingest! ci-a)
+                    (db-snapshot))]
+      (= snap-ab snap-ba))))
+
+(defspec commutative-role-managed-policy 50
+  (prop/for-all [[role-ci policy-ci] gen-role-with-managed-policy]
+    (let [snap-rp (with-fresh-db
+                    (sut/ingest! role-ci)
+                    (sut/ingest! policy-ci)
+                    (db-snapshot))
+          snap-pr (with-fresh-db
+                    (sut/ingest! policy-ci)
+                    (sut/ingest! role-ci)
+                    (db-snapshot))]
+      (= snap-rp snap-pr))))
+
+;; ── 10c: N-ary commutativity (all permutations) ──────────────────────────
+
+(defspec commutative-all-6-permutations 20
+  (prop/for-all [[ci-a ci-b ci-p] gen-triple]
+    (let [perms [[ci-a ci-b ci-p]
+                 [ci-a ci-p ci-b]
+                 [ci-b ci-a ci-p]
+                 [ci-b ci-p ci-a]
+                 [ci-p ci-a ci-b]
+                 [ci-p ci-b ci-a]]
+          snaps (mapv (fn [perm]
+                        (with-fresh-db
+                          (run! sut/ingest! perm)
+                          (db-snapshot)))
+                      perms)]
+      (apply = snaps))))
+
 ;;; ─── Runner ──────────────────────────────────────────────────────────────────
 
 (defn -main [& _args]
-  (run-tests 'iam-oracle-test))
+  (run-tests (quote iam-oracle-test)))

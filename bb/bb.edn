@@ -19,4 +19,10 @@
         com.cognitect.aws/dynamodb {:mvn/version "RELEASE"}
         com.cognitect.aws/s3 {:mvn/version "RELEASE"}}
 
- :pods {huahaiy/datalevin {:version "0.10.5"}}}
+ :pods {huahaiy/datalevin {:version "0.10.5"}}
+
+ ;; JVM-only: run property-based tests with
+ ;;   clj -M:test -e "(require 'iam-oracle-test)(clojure.test/run-tests 'iam-oracle-test)"
+ :aliases {:test {:extra-deps {org.clojure/test.check {:mvn/version "RELEASE"}
+                               datalevin/datalevin     {:mvn/version "RELEASE"}
+                               cheshire/cheshire       {:mvn/version "RELEASE"}}}}}
