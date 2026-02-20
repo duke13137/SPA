@@ -12,6 +12,7 @@ node_modules
 *_cherry.*
 
 !.ghci
+!.claude/skills/
 ghcid.txt
 static-ls
 *tags*
