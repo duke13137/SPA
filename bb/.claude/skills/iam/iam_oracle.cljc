@@ -996,3 +996,120 @@
    echo '{\"Effect\":\"Allow\",...}' | bb -x iam-oracle/tidy-policy"
   [_opts]
   (->json (split-statement-by-access-level (slurp *in*))))
+
+;; ── Trust graph ─────────────────────────────────────────────────────────────
+
+(defn who-trusts
+  "Roles that trust this role (it can assume them).
+   bb -x iam-oracle/who-trusts --arn ARN"
+  [{:keys [arn]}]
+  (->json (roles-trusting arn)))
+
+(defn trusted-by
+  "Roles trusted by this role (they can assume it).
+   bb -x iam-oracle/trusted-by --arn ARN"
+  [{:keys [arn]}]
+  (->json (roles-trusted-by arn)))
+
+(defn chain
+  "Transitive trust: all roles reachable from a role.
+   bb -x iam-oracle/chain --arn ARN"
+  [{:keys [arn]}]
+  (->json (trust-chain arn)))
+
+(defn graph
+  "Full role→role trust graph.
+   bb -x iam-oracle/graph"
+  [_opts]
+  (->json (trust-graph)))
+
+(defn by-service
+  "Roles whose trust policy allows a service to assume them.
+   bb -x iam-oracle/by-service --service lambda.amazonaws.com"
+  [{:keys [service]}]
+  (->json (roles-assuming-service service)))
+
+;; ── Policies & actions ──────────────────────────────────────────────────────
+
+(defn policies
+  "All policies on a role (inline + attached + trust).
+   bb -x iam-oracle/policies --arn ARN"
+  [{:keys [arn]}]
+  (->json (role-all-policies arn)))
+
+(defn actions
+  "All Allow actions for a role.
+   bb -x iam-oracle/actions --arn ARN"
+  [{:keys [arn]}]
+  (->json (role-allowed-actions arn)))
+
+(defn with-policy
+  "Roles that have a managed policy attached.
+   bb -x iam-oracle/with-policy --arn POLICY_ARN"
+  [{:keys [arn]}]
+  (->json (roles-with-attached-policy arn)))
+
+(defn attachments
+  "All managed-policy↔role attachment pairs.
+   bb -x iam-oracle/attachments"
+  [_opts]
+  (->json (policy-attachments)))
+
+(defn find-policies
+  "Managed policies that allow actions matching a prefix.
+   bb -x iam-oracle/find-policies --prefix s3:"
+  [{:keys [prefix]}]
+  (->json (policies-by-action prefix)))
+
+;; ── Action validation ───────────────────────────────────────────────────────
+
+(defn check-actions
+  "Print invalid actions from a JSON array on stdin.
+   echo '[\"s3:GetObject\",\"s3:GettObject\"]' | bb -x iam-oracle/check-actions"
+  [_opts]
+  (->json (invalid-actions (json/parse-string (slurp *in*)))))
+
+(defn expand
+  "Expand a wildcard action pattern to matching action IDs.
+   bb -x iam-oracle/expand --pattern 's3:Get*'"
+  [{:keys [pattern]}]
+  (->json (expand-action-pattern pattern)))
+
+(defn is-readonly
+  "Check if all actions matching a pattern are readonly.
+   bb -x iam-oracle/is-readonly --pattern 's3:Get*'"
+  [{:keys [pattern]}]
+  (->json (action-pattern-readonly? pattern)))
+
+(defn check-resource
+  "Check if a resource ARN is valid for an action.
+   bb -x iam-oracle/check-resource --action s3:GetObject --resource 'arn:aws:s3:::bucket/*'"
+  [{:keys [action resource]}]
+  (->json (valid-resource-for-action? action resource)))
+
+(defn compress
+  "Compress action IDs by access level. Reads JSON array from stdin.
+   echo '[\"s3:GetObject\",\"s3:PutObject\"]' | bb -x iam-oracle/compress"
+  [_opts]
+  (->json (compress-actions (json/parse-string (slurp *in*)))))
+
+;; ── Entity lookup ───────────────────────────────────────────────────────────
+
+(defn lookup
+  "Pull full entity by ARN.
+   bb -x iam-oracle/lookup --arn ARN"
+  [{:keys [arn]}]
+  (->json (get-by-arn arn)))
+
+(defn roles
+  "List all IAM roles, optionally filtered by account.
+   bb -x iam-oracle/roles
+   bb -x iam-oracle/roles --account 123456789012"
+  [{:keys [account]}]
+  (->json (if account (list-roles (str account)) (list-roles))))
+
+(defn by-account
+  "List all CIs for an account.
+   bb -x iam-oracle/by-account --account 123456789012"
+  [{:keys [account]}]
+  (->json (list-by-account (str account))))

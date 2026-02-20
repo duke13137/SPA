@@ -1,8 +1,9 @@
 (ns iam-oracle-test
   (:require [clojure.test :refer [deftest is run-tests]]
-            [clojure.test.check.generators :as gen]
-            [clojure.test.check.properties :as prop]
-            [clojure.test.check.clojure-test :refer [defspec]]
+            #?@(:bb  []
+                :clj [[clojure.test.check.generators :as gen]
+                       [clojure.test.check.properties :as prop]
+                       [clojure.test.check.clojure-test :refer [defspec]]])
             [clojure.string :as str]
             [cheshire.core :as json]
             [iam-oracle :as sut]
@@ -27,7 +28,9 @@
        (finally
          (d/close c#)))))
 
-;;; ─── Primitive generators ────────────────────────────────────────────────────
+;;; ─── Primitive generators (JVM only — test.check) ──────────────────────────
+
+#?(:bb nil :clj (do
 
 (def gen-account-id
   "12-digit numeric string, like a real AWS account ID."
@@ -82,6 +85,8 @@
                  (gen/tuple gen-account-id gen-account-id)
                  100))
 
+)) ;; end #?(:clj ...)
+
 ;;; ─── Document generators (JSON strings) ─────────────────────────────────────
 
 (defn trust-doc-for-service [svc]
@@ -97,6 +102,8 @@
     "Statement" [{"Effect"    "Allow"
                   "Principal" {"AWS" role-arn}
                   "Action"    "sts:AssumeRole"}]}))
+
+#?(:bb nil :clj (do
 
 (def gen-trust-doc-service
   (gen/let [svc gen-service]
@@ -118,6 +125,8 @@
       "Statement" [{"Effect"   "Deny"
                     "Action"   actions
                     "Resource" "*"}]})))
+
+)) ;; end #?(:clj ...)
 
 ;;; ─── CI map builders ─────────────────────────────────────────────────────────
 
@@ -158,6 +167,8 @@
                                     :policyVersionList [{:isDefaultVersion true
                                                          :document         policy-doc}]}}))
 
+#?(:bb nil :clj (do
+
 (def gen-role-ci
   (gen/let [arn       gen-role-arn
             acct      gen-account-id
@@ -169,6 +180,12 @@
             acct       gen-account-id
             policy-doc gen-allow-policy-doc]
     (make-managed-policy-ci arn acct policy-doc)))
+
+)) ;; end #?(:clj ...)
+
+;;; ─── Groups 1–4: Property-based tests (JVM only) ──────────────────────────
+
+#?(:bb nil :clj (do
 
 ;;; ─── Group 1: Round-trip & lifecycle ────────────────────────────────────────
 
@@ -311,6 +328,8 @@
         (sut/ingest! ci)
         (boolean (some #(= (:arn %) policy-arn)
                        (sut/policies-by-action (str prefix ":"))))))))
+
+)) ;; end #?(:clj ...) Groups 1–4
 
 ;;; ─── Group 5: Servicespec (action validation + wildcard queries) ───────────
 ;;; Uses a single shared DB to avoid LMDB segfault from rapid temp DB churn.
@@ -946,11 +965,13 @@
       (is (= #{"s3:GettObject" "s3:FakeDelete" "s3:ListtBucket"}
              (set (get unk "Action")))))))
 
-;;; ─── Group 10: Commutativity & idempotency proofs ─────────────────────────
+;;; ─── Group 10: Commutativity & idempotency proofs (JVM only) ───────────────
 ;;; Mathematical properties of ingest!:
 ;;;   Idempotent:  I(x) . I(x)   = I(x)
 ;;;   Commutative: I(a) . I(b)   = I(b) . I(a)  for all CI pairs
 ;;;   N-ary:       I(pi(S))      = I(sigma(S))   for any permutations pi, sigma
+
+#?(:bb nil :clj (do
 
 (defn- db-snapshot
   "Extract a normalized, comparable snapshot of all logical facts in the DB.
@@ -1076,6 +1097,8 @@
                           (db-snapshot)))
                       perms)]
       (apply = snaps))))
+
+)) ;; end #?(:clj ...) Group 10
 
 ;;; ─── Runner ──────────────────────────────────────────────────────────────────
 
