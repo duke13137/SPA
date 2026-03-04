@@ -40,6 +40,7 @@ todoView = do
   let matched = IntMap.toList items
       activeCount = IntMap.size $ IntMap.filter (not . (.completed)) items
       completedCount = IntMap.size $ IntMap.filter (.completed) items
+      activeCountText = show activeCount <> if activeCount == 1 then " item left" else " items left"
   H.div do
     H.form (AddTodo "") do
       H.input "title" & H.placeholder "What needs to be done?"
@@ -52,7 +53,7 @@ todoView = do
         H.text todo.title
         H.button (DeleteTodo i) "✕"
 
-    H.text $ T.pack $ show activeCount <> " items left"
+    H.text activeCountText
 
     when (completedCount > 0) $
       H.button ClearCompletedTodo $ H.text "Clear completed"
@@ -67,8 +68,11 @@ instance H.HyperView TodoApp es where
 
   update (AddTodo title) = do
     items <- State.get @(IntMap.IntMap Todo)
-    let newItems = IntMap.insert (IntMap.size items + 1) (Todo title False) items
-    State.put newItems
+    let trimmed = T.strip title
+        nextTodoId = maybe 1 ((+ 1) . fst) (IntMap.lookupMax items)
+    when (not (T.null trimmed)) do
+      let newItems = IntMap.insert nextTodoId (Todo trimmed False) items
+      State.put newItems
     pure todoView
 
   update (ToggleTodo i) = do
