@@ -31,6 +31,8 @@ import Colog
 import Database
 import Htmx
 
+import HyperTodo
+
 -- Todo types
 data Todo = Todo { title :: Text, completed :: Bool }
 type Todos = TVar (IntMap Todo)
