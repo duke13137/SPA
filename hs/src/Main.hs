@@ -117,12 +117,12 @@ todoRoutes todos nextId =
 -- Todo handlers
 getTodosPage :: Todos -> ResponderM a
 getTodosPage todos = do
-  items <- liftIO $ readTVarIO todos
+  items <- readTVarIO todos
   render $ todoPage items "all"
 
 getTodoListPartial :: Todos -> ResponderM a
 getTodoListPartial todos = do
-  items <- liftIO $ readTVarIO todos
+  items <- readTVarIO todos
   filter_ <- Twain.paramMaybe @Text "filter"
   search_ <- Twain.paramMaybe @Text "search"
   render $ todoListSection items (fromMaybe "" search_) (fromMaybe "all" filter_)
@@ -130,11 +130,11 @@ getTodoListPartial todos = do
 addTodo :: Todos -> NextId -> ResponderM a
 addTodo todos nextId = do
   title' <- Twain.param @Text "title"
-  liftIO $ atomically do
+  atomically do
     i <- readTVar nextId
     modifyTVar' nextId (+ 1)
     modifyTVar' todos (IntMap.insert i (Todo title' False))
-  items <- liftIO $ readTVarIO todos
+  items <- readTVarIO todos
   render do
     todoListSection items "" "all"
     [hsx|<input id="todo-input" name="title" placeholder="What needs to be done?" required autofocus hx-swap-oob="true">|]
@@ -142,24 +142,24 @@ addTodo todos nextId = do
 toggleTodo :: Todos -> ResponderM a
 toggleTodo todos = do
   i <- Twain.param @Int "id"
-  liftIO $ atomically $
+  atomically $
     modifyTVar' todos (IntMap.adjust (\t -> Todo t.title (not t.completed)) i)
-  items <- liftIO $ readTVarIO todos
+  items <- readTVarIO todos
   render $ todoListSection items "" "all"
 
 deleteTodo :: Todos -> ResponderM a
 deleteTodo todos = do
   i <- Twain.param @Int "id"
-  liftIO $ atomically $
+  atomically $
     modifyTVar' todos (IntMap.delete i)
-  items <- liftIO $ readTVarIO todos
+  items <- readTVarIO todos
   render $ todoListSection items "" "all"
 
 clearCompleted :: Todos -> ResponderM a
 clearCompleted todos = do
-  liftIO $ atomically $
+  atomically $
     modifyTVar' todos (IntMap.filter (not . (.completed)))
-  items <- liftIO $ readTVarIO todos
+  items <- readTVarIO todos
   render $ todoListSection items "" "all"
 
 -- Todo views
