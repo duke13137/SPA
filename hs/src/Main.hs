@@ -18,6 +18,7 @@ import Debug.Breakpoint
 import Rapid
 
 import Data.IntMap.Strict qualified as IntMap
+import Data.Proxy (Proxy (..))
 import Data.Text qualified as T
 
 import Network.Wai.Handler.Warp qualified as Wai
@@ -26,6 +27,7 @@ import Web.Twain as Twain
 
 import Data.Time (UTCTime)
 import Servant.API
+import Servant.Server (emptyServer, serve)
 
 import Colog
 import Database
@@ -245,4 +247,4 @@ todoItem i todo = [hsx|
 type MyApi = EmptyAPI
 
 api :: Application
-api = undefined
+api = serve (Proxy :: Proxy MyApi) emptyServer
