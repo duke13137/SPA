@@ -14,9 +14,8 @@ import Hasql.Pool qualified as Pool
 import Hasql.Session
 import Hasql.Statement
 import Hasql.TH
+import Network.Wai
 import System.IO.Unsafe (unsafePerformIO)
-
-import Web.Hyperbole qualified as H
 
 tasty :: TestTree -> IO ()
 tasty action =
@@ -38,7 +37,7 @@ testRoute = testGroup "Tasty.Wai Tests"
       assertBodyContains "Not found" resp
   ]
 
-mockApp :: H.Application
+mockApp :: Application
 mockApp = unsafePerformIO do
   todos <- newTVarIO IntMap.empty
   nextId <- newTVarIO (1 :: Int)

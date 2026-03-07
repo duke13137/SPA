@@ -17,15 +17,15 @@ import Prelude
 import Debug.Breakpoint
 import Rapid
 
+import Data.IntMap.Strict qualified as IntMap
+import Data.Text qualified as T
+
 import Network.Wai.Handler.Warp qualified as Wai
 import Network.Wai.UrlMap qualified as Wai
 import Web.Twain as Twain
 
-import Web.Atomic.CSS
-import Web.Hyperbole as H
-
-import Data.IntMap.Strict qualified as IntMap
-import Data.Text qualified as T
+import Data.Time (UTCTime)
+import Servant.API
 
 import Colog
 import Database
@@ -46,11 +46,8 @@ main = do
 
 app :: Todos -> NextId -> Application
 app todos nextId = Wai.mapUrls $
-        Wai.mount "hyper" hyperApp
+        Wai.mount "api" api
     <|> Wai.mountRoot (foldr ($) (Twain.notFound page404) (routes todos nextId))
-
-hyperApp :: Application
-hyperApp  = H.liveApp H.quickStartDocument (H.runPage hyperView)
 
 routes :: Todos -> NextId -> [Middleware]
 routes todos nextId =
@@ -245,24 +242,7 @@ todoItem i todo = [hsx|
       | todo.completed = [hsx|<s style="opacity: 0.5;">{todo.title}</s>|]
       | otherwise      = [hsx|<span>{todo.title}</span>|]
 
-hyperView :: Page es '[Event]
-hyperView = do
-  pure $ do
-    hyper Event1 $ hyperButton "Hello"
-    hyper Event2 $ hyperButton "World!"
+type MyApi = EmptyAPI
 
-data Event = Event1 | Event2
-  deriving (Generic, ViewId)
-
-instance HyperView Event es where
-  data Action Event
-    = Louder Text
-    deriving (Generic, ViewAction)
-
-  update (Louder msg) = do
-    let new = msg <> "!"
-    pure $ hyperButton new
-
-hyperButton :: Text -> View Event ()
-hyperButton msg = do
-  button (Louder msg) (H.text msg)
+api :: Application
+api = undefined
