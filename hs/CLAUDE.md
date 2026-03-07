@@ -32,13 +32,13 @@ A Haskell web app combining two UI approaches on a single Warp server (port 8080
   <https://four.htmx.org/reference/>
   <https://picocss.com/docs>
 - **Twain routes** (`/`, `/hello/:name`) — traditional request/response with HTMX for dynamic updates, rendered via `[hsx|...|]` quasiquoter (Lucid + IHP.HSX)
-- **Hyperbole app** (`/hyper/*`) — reactive server-side components with typed actions
+- **Servant API** (`/api/*`) — <https://github.com/haskell-servant/servant>
 
-Routing is mounted via `Wai.mount` in `Main.app` using `Wai.mapUrls` to dispatch between Twain middleware and the Hyperbole live app.
+Routing is mounted via `Wai.mount` in `Main.app` using `Wai.mapUrls` to dispatch between Twain middleware and Servant api
 
 ### Key Modules
 
-- **`Main`** — Server startup (with `Rapid` for hot reload), routes, Twain handlers, Hyperbole views
+- **`Main`** — Server startup (with `Rapid` for hot reload), routes, Twain handlers, Servant api
 - **`Prelude`** — Custom prelude: re-exports Relude, Optics, Monads (MonadAsync/MonadThrow/etc.), and strict-wrapper
 - **`Database`** — Hasql connection/pool setup; reads `PGHOST`, `PGPORT`, `PGDATABASE`, `PGUSER`, `PGPASSWORD` env vars
 - **`Htmx`** — Configures the `hsx` quasiquoter with HTMX attributes and custom tag names

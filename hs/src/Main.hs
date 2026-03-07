@@ -18,6 +18,7 @@ import Debug.Breakpoint
 import Rapid
 
 import Data.IntMap.Strict qualified as IntMap
+import Data.Proxy (Proxy (..))
 import Data.Text qualified as T
 
 import Network.Wai.Handler.Warp qualified as Wai
@@ -26,6 +27,7 @@ import Web.Twain as Twain
 
 import Data.Time (UTCTime)
 import Servant.API
+import Servant.Server (emptyServer, serve)
 
 import Colog
 import Database
@@ -43,6 +45,9 @@ main = do
   nextId <- newTVarIO (1 :: Int)
   rapid 0 \r -> restart r "server" $
     Wai.run 8080 (app todos nextId)
+
+api :: Application
+api = serve @EmptyAPI Proxy emptyServer
 
 app :: Todos -> NextId -> Application
 app todos nextId = Wai.mapUrls $
@@ -64,7 +69,7 @@ htmx body = [hsx|
       <meta name="viewport" content="width=device-width, initial-scale=1.0">
       <title>My Simple HTML Page</title>
       <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@picocss/pico@2/css/pico.min.css">
-      <script src="https://cdn.jsdelivr.net/npm/htmx.org@4.0.0-alpha6/dist/htmx.js"></script>
+      <script src="https://cdn.jsdelivr.net/npm/htmx.org@4.0.0-alpha7/dist/htmx.js"></script>
     </head>
     <body>
       <main class="container">
@@ -241,8 +246,3 @@ todoItem i todo = [hsx|
     titleHtml
       | todo.completed = [hsx|<s style="opacity: 0.5;">{todo.title}</s>|]
       | otherwise      = [hsx|<span>{todo.title}</span>|]
-
-type MyApi = EmptyAPI
-
-api :: Application
-api = undefined

@@ -21,19 +21,21 @@ exe:
 
 env:
 	rm .ghc.environment.*$(GHC)* || true
-	cabal install -w ghc-$(GHC) --allow-newer --enable-documentation --package-env . \
-		--lib base template-haskell relude text containers stm stm-containers \
-					aeson optics aeson-optics pretty-show strict-wrapper time \
-					bluefin co-log io-classes io-sim streamly-core \
-					hasql hasql-th hasql-postgresql-types hasql-pool hasql-transaction \
-					cookie http-api-data http-types servant twain wai wai-extra warp \
-					auto-split breakpoint rapid tasty tasty-hunit tasty-wai
+	cabal install -w ghc-$(GHC) --allow-newer --enable-documentation \
+    --package-env . \
+    --constraint='wai-app-static < 3.1.8' \
+    --lib base template-haskell relude text containers stm stm-containers \
+          aeson optics aeson-optics pretty-show strict-wrapper time \
+          bluefin co-log io-classes io-sim streamly-core \
+          hasql hasql-th hasql-pool hasql-transaction \
+          servant servant-server twain wai wai-extra warp \
+          breakpoint rapid tasty tasty-hunit tasty-wai \
 
 hie:
 	hiedb-$(GHC) -D .hiedb index .build
 
 pg:
 	docker run --name postgres \
-		-e POSTGRES_PASSWORD=$(shell cat /var/run/pgpasswd) \
+		-e POSTGRES_PASSWORD=$(PGPASSWORD) \
 		-p 5432:5432 \
 		-d postgres
