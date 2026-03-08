@@ -14,8 +14,6 @@
     [starfederation.datastar.clojure.adapter.http-kit2 :as hk]
     [todoapp]))
 
-(require '[playback.core])
-(require '[portal.console :as log])
 (require '[sci.nrepl.browser-server :as browser])
 (require '[babashka.nrepl.server :as nrepl])
 
@@ -75,7 +73,6 @@
 (def message "Hello from server!")
 
 (defn update-hello [req sse]
-  (log/info req)
   (let [d (-> req get-signals :delay int)]
     (dotimes [i (count message)]
       (d*/patch-elements! sse

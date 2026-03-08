@@ -3,7 +3,6 @@
         funcool/promesa     {:mvn/version "RELEASE"}
 
         com.fulcrologic/guardrails {:mvn/version "RELEASE"}
-        com.github.gnl/playback    {:mvn/version "RELEASE"}
         vvvvalvalval/scope-capture {:mvn/version "RELEASE"}
 
         dev.data-star.clojure/sdk {:mvn/version "RELEASE"}
