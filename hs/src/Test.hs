@@ -40,7 +40,7 @@ testRoute = testGroup "Tasty.Wai Tests"
 mockApp :: Application
 mockApp = unsafePerformIO do
   todos <- newTVarIO IntMap.empty
-  nextId <- newTVarIO (1 :: Int)
+  nextId <- newTVarIO 1
   pure $ app todos nextId
 {-# NOINLINE mockApp #-}
 

@@ -1,4 +1,3 @@
-:set -fplugin=AutoSplit
 :set -fplugin=Debug.Breakpoint
 
 :seti -XGHC2024

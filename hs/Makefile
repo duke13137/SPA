@@ -24,12 +24,12 @@ env:
 	cabal install -w ghc-$(GHC) --allow-newer --enable-documentation \
     --package-env . \
     --constraint='wai-app-static < 3.1.8' \
-    --lib base template-haskell relude text containers stm stm-containers \
-          aeson optics aeson-optics pretty-show strict-wrapper time \
-          bluefin co-log io-classes io-sim streamly-core \
+    --lib base template-haskell text relude containers stm-containers \
+          aeson optics aeson-optics http-media pretty-show strict-wrapper \
+          breakpoint bluefin co-log io-classes io-sim \
           hasql hasql-th hasql-pool hasql-transaction \
-          servant servant-server twain wai wai-extra warp \
-          breakpoint rapid tasty tasty-hunit tasty-wai \
+          servant servant-client servant-server servant-quickcheck \
+          rapid twain wai wai-extra warp tasty tasty-hunit tasty-wai
 
 hie:
 	hiedb-$(GHC) -D .hiedb index .build

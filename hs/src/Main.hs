@@ -1,42 +1,36 @@
 {-# LANGUAGE BlockArguments        #-}
 {-# LANGUAGE DataKinds             #-}
-{-# LANGUAGE DeriveAnyClass        #-}
+{-# LANGUAGE DerivingVia           #-}
 {-# LANGUAGE DuplicateRecordFields #-}
+{-# LANGUAGE GHC2024               #-}
 {-# LANGUAGE NoFieldSelectors      #-}
 {-# LANGUAGE OverloadedRecordDot   #-}
 {-# LANGUAGE OverloadedStrings     #-}
 {-# LANGUAGE QuasiQuotes           #-}
-{-# LANGUAGE RecordWildCards       #-}
-{-# LANGUAGE StrictData            #-}
-{-# LANGUAGE TypeFamilies          #-}
+{-# LANGUAGE UndecidableInstances  #-}
 module Main where
 
 import Optics
-import Prelude
-
-import Debug.Breakpoint
-import Rapid
+import Prelude hiding (Handler)
 
 import Data.IntMap.Strict qualified as IntMap
 import Data.Proxy (Proxy (..))
 import Data.Text qualified as T
 
+import Lucid (Html, renderBS)
+import Network.HTTP.Media ((//), (/:))
 import Network.Wai.Handler.Warp qualified as Wai
 import Network.Wai.UrlMap qualified as Wai
+import Servant.API
+import Servant.Server
 import Web.Twain as Twain
 
-import Data.Time (UTCTime)
-import Servant.API
-import Servant.Server (emptyServer, serve)
+-- import Debug.Breakpoint
+import Rapid
 
 import Colog
 import Database
 import Htmx
-
--- Todo types
-data Todo = Todo { title :: Text, completed :: Bool }
-type Todos = TVar (IntMap Todo)
-type NextId = TVar Int
 
 -- $> main
 main :: IO ()
@@ -46,18 +40,38 @@ main = do
   rapid 0 \r -> restart r "server" $
     Wai.run 8080 (app todos nextId)
 
-api :: Application
-api = serve (Proxy @EmptyAPI) emptyServer
+data HTML
+
+instance Accept HTML where
+  contentType _ = "text" // "html" /: ("charset", "utf-8")
+
+instance MimeRender HTML (Html ()) where
+  mimeRender _ = renderBS
+
+type HelloAPI = "hello" :> Capture "name" Text :> Get '[HTML] (Html ())
+
+helloServer :: Server HelloAPI
+helloServer = helloHandler
+
+helloHandler :: Text -> Handler (Html ())
+helloHandler name = return [hsx|<h1 id="hello">Hello, {name}!</h1>|]
+
+htmxApp :: Application
+htmxApp = serve (Proxy @HelloAPI) helloServer
+
+-- Todo types
+data Todo = Todo { title :: Text, completed :: Bool }
+type Todos = TVar (IntMap Todo)
+type NextId = TVar Int
 
 app :: Todos -> NextId -> Application
 app todos nextId = Wai.mapUrls $
-        Wai.mount "api" api
+        Wai.mount "htmx" htmxApp
     <|> Wai.mountRoot (foldr ($) (Twain.notFound page404) (routes todos nextId))
 
 routes :: Todos -> NextId -> [Middleware]
 routes todos nextId =
   [ Twain.get "/" index
-  , Twain.get "/hello/:name" echoName
   ] <> todoRoutes todos nextId
 
 htmx :: Html () -> Html ()
@@ -87,20 +101,11 @@ render = Twain.send . Twain.html . renderBS
 
 index :: ResponderM a
 index = render $ htmx [hsx|
-    <button hx-get="/hello/world" hx-target="#hello">
+    <button hx-get="/htmx/hello/world" hx-target="#hello">
         Welcome
     </button>
     <h1 id="hello"></h1>
 |]
-
-echoName :: ResponderM a
-echoName = logger do
-  who <- lift $ Twain.param @Text "name"
-  logInfo $ "name: " <> who
-  -- breakpointM
-  lift $ render [hsx|
-    <h1 id="hello">Hello, {who}!</h1>
-  |]
 
 page404 :: ResponderM a
 page404 = send $ Twain.html "<h1>Not found...</h1>"
