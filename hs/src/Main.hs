@@ -47,7 +47,7 @@ main = do
     Wai.run 8080 (app todos nextId)
 
 api :: Application
-api = serve @EmptyAPI Proxy emptyServer
+api = serve (Proxy @EmptyAPI) emptyServer
 
 app :: Todos -> NextId -> Application
 app todos nextId = Wai.mapUrls $
