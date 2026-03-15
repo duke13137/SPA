@@ -88,3 +88,5 @@
     (js/console.log (str "\n" pass " passed, " fail " failed"))
     (when (seq errors) (js/console.error "Failed:" (clj->js errors)))
     @test-results))
+
+(run-tests)

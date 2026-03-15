@@ -9,7 +9,7 @@
     />
     <script
       type="module"
-      src="https://cdn.jsdelivr.net/gh/starfederation/datastar@1.0.0-RC.7/bundles/datastar.js"
+      src="https://cdn.jsdelivr.net/gh/starfederation/datastar@1.0.0-RC.8/bundles/datastar.js"
     ></script>
     <script
       src="https://cdn.jsdelivr.net/npm/scittle@0.8.31/dist/scittle.js"
@@ -30,6 +30,9 @@
       data-signals:todo="''"
       data-signals:filter="'all'"
       data-signals:edittext="''"
+      data-signals:cid="'{{client-id}}'"
+      data-on-load="@get('/todos/sse/stream')"
+      data-on-interval__duration.2s="@get('/todos/sse/poll')"
     >
       <header class="header">
         <h1>todos</h1>

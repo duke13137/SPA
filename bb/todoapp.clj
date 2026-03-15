@@ -11,8 +11,6 @@
 (pods/load-pod 'huahaiy/datalevin "0.10.5")
 (require '[pod.huahaiy.datalevin :as d])
 
-(require '[sc.api :as sc])
-
 ;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Datalevin
 ;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -22,6 +20,15 @@
    :todo/done {:db/valueType :db.type/boolean}})
 
 (def conn (d/get-conn "/tmp/bb-todos" schema))
+
+(defn db []
+  (d/db conn))
+
+(defn todo-ids []
+  (d/q '[:find [?e ...] :where [?e :todo/name _]] (db)))
+
+(defn pull-todo [id]
+  (d/pull (db) [:db/id :todo/name :todo/done] id))
 
 (defn ->todo
   "Convert Datalevin pull result to component-friendly map."
@@ -36,7 +43,7 @@
   (d/transact! conn [{:todo/name name :todo/done false}]))
 
 (defn toggle-todo! [id]
-  (let [done (:todo/done (d/pull (d/db conn) [:todo/done] id))]
+  (let [done (:todo/done (d/pull (db) [:todo/done] id))]
     (d/transact! conn [[:db/add id :todo/done (not done)]])))
 
 (defn update-todo-name! [id name]
@@ -46,11 +53,12 @@
   (d/transact! conn [[:db/retractEntity id]]))
 
 (defn remove-all-completed! []
-  (let [ids (d/q '[:find [?e ...] :where [?e :todo/name _]] (d/db conn))
-        all (map #(d/pull (d/db conn) [:db/id :todo/done] %) ids)
-        completed (filter :todo/done all)]
-    (when (seq completed)
-      (d/transact! conn (mapv #(vector :db/retractEntity (:db/id %)) completed)))))
+  (let [completed-ids (->> (todo-ids)
+                           (map #(d/pull (db) [:db/id :todo/done] %))
+                           (filter :todo/done)
+                           (map :db/id))]
+    (when (seq completed-ids)
+      (d/transact! conn (mapv #(vector :db/retractEntity %) completed-ids)))))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Queries
@@ -59,10 +67,9 @@
 ;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 (defn get-all-todos []
-  (let [ids (d/q '[:find [?e ...] :where [?e :todo/name _]] (d/db conn))]
-    (->> ids
-         (map #(->todo (d/pull (d/db conn) [:db/id :todo/name :todo/done] %)))
-         (sort-by :id))))
+  (->> (todo-ids)
+       (map #(->todo (pull-todo %)))
+       (sort-by :id)))
 
 (defn filtered-todos [filter-name]
   (let [all (get-all-todos)]
@@ -72,7 +79,7 @@
       all)))
 
 (defn get-todo [id]
-  (->todo (d/pull (d/db conn) [:db/id :todo/name :todo/done] id)))
+  (->todo (pull-todo id)))
 
 (defn get-items-left []
   (count (remove :done (get-all-todos))))
@@ -87,6 +94,9 @@
 (defn html [hiccup]
   (str (h/html hiccup)))
 
+(defn patch-signals! [sse m]
+  (d*/patch-signals! sse (json/generate-string m)))
+
 (defn get-signals [req]
   (let [raw (d*/get-signals req)]
     (json/parse-string (if (string? raw) raw (slurp raw)) true)))
@@ -94,23 +104,37 @@
 (defn path-id [req]
   (parse-long (first (:path-params req))))
 
-(def sse-connections (atom #{}))
+(def streams (atom {}))
 
-(defn use-sse [handler]
+(defn remove-stream-by-sse! [sse]
+  (swap! streams (fn [m]
+                   (into {} (remove (fn [[_ v]] (= sse (:sse v))) m)))))
+
+(defn update-stream-filter! [cid filter-name]
+  (when (and cid (seq cid))
+    (swap! streams update cid assoc :filter (or filter-name "all"))))
+
+(defn sse-response [handler & {:keys [on-close]}]
   (fn [req]
     (hk/->sse-response req
       {hk/on-open
        (fn [sse]
-         (swap! sse-connections conj sse)
          (d*/with-open-sse sse
            (handler req sse)))
        hk/on-close
        (fn [sse status]
-         (swap! sse-connections disj sse)
+         (when on-close
+           (on-close sse status))
          (println status))
        hk/on-exception
        (fn [e]
          (println e))})))
+
+(defn use-sse [handler]
+  (sse-response handler))
+
+(defn use-sse-stream [handler]
+  (sse-response handler :on-close (fn [sse _] (remove-stream-by-sse! sse))))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Components
@@ -159,28 +183,38 @@
     (d*/patch-elements! sse (html (item-count)))
     (d*/patch-elements! sse (html (clear-completed-button)))))
 
+(defn broadcast! []
+  (doseq [[cid {:keys [sse filter]}] @streams]
+    (try
+      (patch-all! sse filter)
+      (catch Exception _
+        (swap! streams dissoc cid)))))
+
+(defn respond! [sse filter & {:keys [broadcast? signals]}]
+  (patch-all! sse filter)
+  (when broadcast? (broadcast!))
+  (when signals (patch-signals! sse signals))
+  (d*/close-sse! sse))
+
 ;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; SSE Handlers
 ;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 (defn list-todo [req sse]
-  (let [{:keys [filter]} (get-signals req)]
-    (patch-all! sse filter)
-    (d*/close-sse! sse)))
+  (let [{:keys [filter cid]} (get-signals req)]
+    (update-stream-filter! cid filter)
+    (respond! sse filter)))
 
 (defn add-todo [req sse]
-  (sc.api/spy)
   (let [{:keys [todo filter]} (get-signals req)]
     (when-not (str/blank? todo)
       (add-todo! todo))
-    (patch-all! sse filter)
-    (d*/patch-signals! sse (json/generate-string {:todo ""}))
-    (d*/close-sse! sse)))
+    (respond! sse filter :broadcast? true :signals {:todo ""})))
 
 (defn edit-todo [req sse]
   (let [id (path-id req)
         todo (get-todo id)]
-    (d*/patch-signals! sse (json/generate-string {:edittext (:name todo)}))
+    (patch-signals! sse {:edittext (:name todo)})
     (d*/patch-elements! sse (html (todo-edit-form id (:name todo))))
     (d*/close-sse! sse)))
 
@@ -189,28 +223,30 @@
         id (path-id req)]
     (when-not (str/blank? edittext)
       (update-todo-name! id edittext))
-    (patch-all! sse filter)
-    (d*/close-sse! sse)))
+    (respond! sse filter :broadcast? true)))
 
 (defn toggle-todo [req sse]
   (let [{:keys [filter]} (get-signals req)
         id (path-id req)]
     (toggle-todo! id)
-    (patch-all! sse filter)
-    (d*/close-sse! sse)))
+    (respond! sse filter :broadcast? true)))
 
 (defn delete-todo [req sse]
   (let [{:keys [filter]} (get-signals req)
         id (path-id req)]
     (remove-todo! id)
-    (patch-all! sse filter)
-    (d*/close-sse! sse)))
+    (respond! sse filter :broadcast? true)))
 
 (defn clear-todo [req sse]
   (let [{:keys [filter]} (get-signals req)]
     (remove-all-completed!)
-    (patch-all! sse filter)
-    (d*/close-sse! sse)))
+    (respond! sse filter :broadcast? true)))
+
+(defn stream-todos [req sse]
+  (let [{:keys [filter cid]} (get-signals req)]
+    (when (and cid (seq cid))
+      (swap! streams assoc cid {:sse sse :filter (or filter "all")}))
+    (patch-all! sse filter)))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Page handler
@@ -222,7 +258,8 @@
      :body (render-file "todo.html"
                         {:initial-todos (html (todo-list todos))
                          :item-count (html (item-count))
-                         :clear-completed (html (clear-completed-button))})}))
+                         :clear-completed (html (clear-completed-button))
+                         :client-id (str (java.util.UUID/randomUUID))})}))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Routes
@@ -231,6 +268,8 @@
 (def routes
   {"GET /todos"               app-index
    "GET /todos/sse"           (use-sse #'list-todo)
+   "GET /todos/sse/poll"      (use-sse #'list-todo)
+   "GET /todos/sse/stream"    (use-sse-stream #'stream-todos)
    "POST /todos/sse"          (use-sse #'add-todo)
    "GET /todos/sse/edit/*"    (use-sse #'edit-todo)
    "PATCH /todos/sse/name/*"  (use-sse #'save-todo)
