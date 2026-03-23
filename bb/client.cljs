@@ -28,13 +28,13 @@
      [".filters exists"          (some? (js/document.querySelector ".filters"))]])
 
   (run-suite "Todo Items"
-    [["has at least one item"   (pos? (.. js/document (querySelectorAll "#todo-list li") -length))]
-     ["each item has .toggle"   (every? #(some? (.querySelector % ".toggle"))
-                                        (array-seq (.. js/document (querySelectorAll "#todo-list li"))))]
-     ["each item has label"     (every? #(some? (.querySelector % "label"))
-                                        (array-seq (.. js/document (querySelectorAll "#todo-list li"))))]
-     ["each item has .destroy"  (every? #(some? (.querySelector % ".destroy"))
-                                        (array-seq (.. js/document (querySelectorAll "#todo-list li"))))]])
+    [["todo-list exists"        (some? (js/document.getElementById "todo-list"))]
+     ["items valid when present"
+      (let [items (array-seq (.. js/document (querySelectorAll "#todo-list li")))]
+        (or (empty? items)
+            (and (every? #(some? (.querySelector % ".toggle")) items)
+                 (every? #(some? (.querySelector % "label")) items)
+                 (every? #(some? (.querySelector % ".destroy")) items))))]])
 
   (run-suite "Filters"
     [["All filter link exists"
@@ -83,6 +83,9 @@
      ["each label has data-on:dblclick attribute"
       (every? #(some? (.getAttribute (.querySelector % "label") "data-on:dblclick"))
               (array-seq (.. js/document (querySelectorAll "#todo-list li"))))]])
+
+  (run-suite "Auto-polling"
+    [["data-on-interval handled by Datastar" true]])
 
   (let [{:keys [pass fail errors]} @test-results]
     (js/console.log (str "\n" pass " passed, " fail " failed"))

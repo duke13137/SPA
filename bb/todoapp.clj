@@ -8,7 +8,7 @@
    [starfederation.datastar.clojure.adapter.http-kit2 :as hk]))
 
 (require '[babashka.pods :as pods])
-(pods/load-pod 'huahaiy/datalevin "0.10.5")
+(pods/load-pod 'huahaiy/datalevin "0.10.7")
 (require '[pod.huahaiy.datalevin :as d])
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -99,12 +99,20 @@
 
 (defn get-signals [req]
   (let [raw (d*/get-signals req)]
-    (json/parse-string (if (string? raw) raw (slurp raw)) true)))
+    (when raw
+      (json/parse-string (if (string? raw) raw (slurp raw)) true))))
 
 (defn path-id [req]
   (parse-long (first (:path-params req))))
 
 (def streams (atom {}))
+(def editing-users (atom {}))
+
+(defn start-editing! [todo-id cid]
+  (swap! editing-users assoc todo-id cid))
+
+(defn stop-editing! [todo-id]
+  (swap! editing-users dissoc todo-id))
 
 (defn remove-stream-by-sse! [sse]
   (swap! streams (fn [m]
@@ -113,6 +121,9 @@
 (defn update-stream-filter! [cid filter-name]
   (when (and cid (seq cid))
     (swap! streams update cid assoc :filter (or filter-name "all"))))
+
+(defn remove-stream-by-cid! [cid]
+  (swap! streams dissoc cid))
 
 (defn sse-response [handler & {:keys [on-close]}]
   (fn [req]
@@ -201,51 +212,66 @@
 ;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 (defn list-todo [req sse]
-  (let [{:keys [filter cid]} (get-signals req)]
+  (let [signals (or (get-signals req) {})
+        {:keys [filter cid]} signals
+        filter (or filter "all")]
     (update-stream-filter! cid filter)
     (respond! sse filter)))
 
 (defn add-todo [req sse]
-  (let [{:keys [todo filter]} (get-signals req)]
+  (let [signals (or (get-signals req) {})
+        {:keys [todo filter]} signals
+        filter (or filter "all")]
     (when-not (str/blank? todo)
       (add-todo! todo))
     (respond! sse filter :broadcast? true :signals {:todo ""})))
 
 (defn edit-todo [req sse]
-  (let [id (path-id req)
+  (let [signals (or (get-signals req) {})
+        id (path-id req)
         todo (get-todo id)]
     (patch-signals! sse {:edittext (:name todo)})
     (d*/patch-elements! sse (html (todo-edit-form id (:name todo))))
     (d*/close-sse! sse)))
 
 (defn save-todo [req sse]
-  (let [{:keys [edittext filter]} (get-signals req)
+  (let [signals (or (get-signals req) {})
+        {:keys [edittext filter]} signals
+        filter (or filter "all")
         id (path-id req)]
     (when-not (str/blank? edittext)
       (update-todo-name! id edittext))
     (respond! sse filter :broadcast? true)))
 
 (defn toggle-todo [req sse]
-  (let [{:keys [filter]} (get-signals req)
+  (let [signals (or (get-signals req) {})
+        {:keys [filter]} signals
+        filter (or filter "all")
         id (path-id req)]
     (toggle-todo! id)
     (respond! sse filter :broadcast? true)))
 
 (defn delete-todo [req sse]
-  (let [{:keys [filter]} (get-signals req)
+  (let [signals (or (get-signals req) {})
+        {:keys [filter]} signals
+        filter (or filter "all")
         id (path-id req)]
     (remove-todo! id)
     (respond! sse filter :broadcast? true)))
 
 (defn clear-todo [req sse]
-  (let [{:keys [filter]} (get-signals req)]
+  (let [signals (or (get-signals req) {})
+        {:keys [filter]} signals
+        filter (or filter "all")]
     (remove-all-completed!)
     (respond! sse filter :broadcast? true)))
 
 (defn stream-todos [req sse]
-  (let [{:keys [filter cid]} (get-signals req)]
+  (let [signals (or (get-signals req) {})
+        {:keys [filter cid]} signals
+        filter (or filter "all")]
     (when (and cid (seq cid))
-      (swap! streams assoc cid {:sse sse :filter (or filter "all")}))
+      (swap! streams assoc cid {:sse sse :filter filter}))
     (patch-all! sse filter)))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -266,13 +292,11 @@
 ;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 (def routes
-  {"GET /todos"               app-index
-   "GET /todos/sse"           (use-sse #'list-todo)
-   "GET /todos/sse/poll"      (use-sse #'list-todo)
-   "GET /todos/sse/stream"    (use-sse-stream #'stream-todos)
-   "POST /todos/sse"          (use-sse #'add-todo)
-   "GET /todos/sse/edit/*"    (use-sse #'edit-todo)
-   "PATCH /todos/sse/name/*"  (use-sse #'save-todo)
-   "PATCH /todos/sse/done/*"  (use-sse #'toggle-todo)
-   "DELETE /todos/sse/clear"  (use-sse #'clear-todo)
-   "DELETE /todos/sse/*"      (use-sse #'delete-todo)})
+   {"GET /todos"               app-index
+    "GET /todos/sse"           (use-sse-stream #'stream-todos)
+    "POST /todos/sse"          (use-sse #'add-todo)
+    "GET /todos/sse/edit/*"    (use-sse #'edit-todo)
+    "PATCH /todos/sse/name/*"  (use-sse #'save-todo)
+    "PATCH /todos/sse/done/*"  (use-sse #'toggle-todo)
+    "DELETE /todos/sse/clear"  (use-sse #'clear-todo)
+    "DELETE /todos/sse/*"      (use-sse #'delete-todo)})

@@ -31,8 +31,8 @@
       data-signals:filter="'all'"
       data-signals:edittext="''"
       data-signals:cid="'{{client-id}}'"
-      data-on-load="@get('/todos/sse/stream')"
-      data-on-interval__duration.2s="@get('/todos/sse/poll')"
+      data-on-load="@get('/todos/sse')"
+      data-on-interval__duration.1s="@get('/todos/sse')"
     >
       <header class="header">
         <h1>todos</h1>
