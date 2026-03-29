@@ -7,14 +7,13 @@
 {-# LANGUAGE OverloadedRecordDot   #-}
 {-# LANGUAGE OverloadedStrings     #-}
 {-# LANGUAGE QuasiQuotes           #-}
-{-# LANGUAGE UndecidableInstances  #-}
+{-# LANGUAGE TypeApplications      #-}
 module Main where
 
 import Optics
 import Prelude hiding (Handler)
 
 import Data.IntMap.Strict qualified as IntMap
-import Data.Proxy (Proxy (..))
 import Data.Text qualified as T
 
 import Lucid (Html, renderBS)
@@ -25,7 +24,6 @@ import Servant.API
 import Servant.Server
 import Web.Twain as Twain
 
--- import Debug.Breakpoint
 import Rapid
 
 import Colog
@@ -35,10 +33,11 @@ import Htmx
 -- $> main
 main :: IO ()
 main = do
-  todos <- newTVarIO IntMap.empty
+  todos  <- newTVarIO IntMap.empty
   nextId <- newTVarIO (1 :: Int)
-  rapid 0 \r -> restart r "server" $
-    Wai.run 8080 (app todos nextId)
+  bracket acquirePool releasePool \pool ->
+    rapid 0 \r -> restart r "server" $
+      Wai.run 8080 (app pool todos nextId)
 
 data HTML
 
@@ -50,29 +49,29 @@ instance MimeRender HTML (Html ()) where
 
 type HelloAPI = "hello" :> Capture "name" Text :> Get '[HTML] (Html ())
 
-helloServer :: Server HelloAPI
+helloServer :: Pool -> Server HelloAPI
 helloServer = helloHandler
 
-helloHandler :: Text -> Handler (Html ())
-helloHandler name = return [hsx|<h1 id="hello">Hello, {name}!</h1>|]
+helloHandler :: Pool -> Text -> Handler (Html ())
+helloHandler _pool name = pure [hsx|<h1 id="hello">Hello, {name}!</h1>|]
 
-htmxApp :: Application
-htmxApp = serve (Proxy @HelloAPI) helloServer
+htmxApp :: Pool -> Application
+htmxApp pool = serve (Proxy @HelloAPI) (helloServer pool)
 
 -- Todo types
 data Todo = Todo { title :: Text, completed :: Bool }
-type Todos = TVar (IntMap Todo)
+type Todos  = TVar (IntMap Todo)
 type NextId = TVar Int
 
-app :: Todos -> NextId -> Application
-app todos nextId = Wai.mapUrls $
-        Wai.mount "htmx" htmxApp
-    <|> Wai.mountRoot (foldr ($) (Twain.notFound page404) (routes todos nextId))
+app :: Pool -> Todos -> NextId -> Application
+app pool todos nextId = Wai.mapUrls $
+        Wai.mount "htmx" (htmxApp pool)
+    <|> Wai.mountRoot (foldr ($) (Twain.notFound page404) (routes pool todos nextId))
 
-routes :: Todos -> NextId -> [Middleware]
-routes todos nextId =
+routes :: Pool -> Todos -> NextId -> [Middleware]
+routes pool todos nextId =
   [ Twain.get "/" index
-  ] <> todoRoutes todos nextId
+  ] <> todoRoutes pool todos nextId
 
 htmx :: Html () -> Html ()
 htmx body = [hsx|
@@ -83,7 +82,7 @@ htmx body = [hsx|
       <meta name="viewport" content="width=device-width, initial-scale=1.0">
       <title>My Simple HTML Page</title>
       <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@picocss/pico@2/css/pico.min.css">
-      <script src="https://cdn.jsdelivr.net/npm/htmx.org@4.0.0-alpha7/dist/htmx.js"></script>
+      <script defer src="https://cdn.jsdelivr.net/npm/htmx.org@next"></script>
     </head>
     <body>
       <main class="container">
@@ -100,7 +99,7 @@ render :: Html () -> ResponderM a
 render = Twain.send . Twain.html . renderBS
 
 index :: ResponderM a
-index = render $ htmx [hsx|
+index  = render $ htmx [hsx|
     <button hx-get="/htmx/hello/world" hx-target="#hello">
         Welcome
     </button>
@@ -111,62 +110,62 @@ page404 :: ResponderM a
 page404 = send $ Twain.html "<h1>Not found...</h1>"
 
 -- Todo routes
-todoRoutes :: Todos -> NextId -> [Middleware]
-todoRoutes todos nextId =
-  [ Twain.get    "/todos"       (getTodosPage todos)
-  , Twain.get    "/todos/list"  (getTodoListPartial todos)
-  , Twain.post   "/todos"       (addTodo todos nextId)
-  , Twain.post   "/todos/clear" (clearCompleted todos)
-  , Twain.patch  "/todos/:id"   (toggleTodo todos)
-  , Twain.delete "/todos/:id"   (deleteTodo todos)
+todoRoutes :: Pool -> Todos -> NextId -> [Middleware]
+todoRoutes pool todos nextId =
+  [ Twain.get    "/todos"       (getTodosPage pool todos)
+  , Twain.get    "/todos/list"  (getTodoListPartial pool todos)
+  , Twain.post   "/todos"       (addTodo pool todos nextId)
+  , Twain.post   "/todos/clear" (clearCompleted pool todos)
+  , Twain.patch  "/todos/:id"   (toggleTodo pool todos)
+  , Twain.delete "/todos/:id"   (deleteTodo pool todos)
   ]
 
 -- Todo handlers
-getTodosPage :: Todos -> ResponderM a
-getTodosPage todos = do
+getTodosPage :: Pool -> Todos -> ResponderM a
+getTodosPage _pool todos = do
   items <- readTVarIO todos
   render $ todoPage items "all"
 
-getTodoListPartial :: Todos -> ResponderM a
-getTodoListPartial todos = do
-  items <- readTVarIO todos
+getTodoListPartial :: Pool -> Todos -> ResponderM a
+getTodoListPartial _pool todos = do
+  items   <- readTVarIO todos
   filter_ <- Twain.paramMaybe @Text "filter"
   search_ <- Twain.paramMaybe @Text "search"
   render $ todoListSection items (fromMaybe "" search_) (fromMaybe "all" filter_)
 
-addTodo :: Todos -> NextId -> ResponderM a
-addTodo todos nextId = do
+addTodo :: Pool -> Todos -> NextId -> ResponderM a
+addTodo _pool todos nextId = do
   title' <- Twain.param @Text "title"
-  atomically do
+  items <- atomically do
     i <- readTVar nextId
     modifyTVar' nextId (+ 1)
     modifyTVar' todos (IntMap.insert i (Todo title' False))
-  items <- readTVarIO todos
+    readTVar todos
   render do
     todoListSection items "" "all"
     [hsx|<input id="todo-input" name="title" placeholder="What needs to be done?" required autofocus hx-swap-oob="true">|]
 
-toggleTodo :: Todos -> ResponderM a
-toggleTodo todos = do
+toggleTodo :: Pool -> Todos -> ResponderM a
+toggleTodo _pool todos = do
   i <- Twain.param @Int "id"
-  atomically $
+  items <- atomically $ do
     modifyTVar' todos (IntMap.adjust (\t -> Todo t.title (not t.completed)) i)
-  items <- readTVarIO todos
+    readTVar todos
   render $ todoListSection items "" "all"
 
-deleteTodo :: Todos -> ResponderM a
-deleteTodo todos = do
+deleteTodo :: Pool -> Todos -> ResponderM a
+deleteTodo _pool todos = do
   i <- Twain.param @Int "id"
-  atomically $
+  items <- atomically $ do
     modifyTVar' todos (IntMap.delete i)
-  items <- readTVarIO todos
+    readTVar todos
   render $ todoListSection items "" "all"
 
-clearCompleted :: Todos -> ResponderM a
-clearCompleted todos = do
-  atomically $
+clearCompleted :: Pool -> Todos -> ResponderM a
+clearCompleted _pool todos = do
+  items <- atomically $ do
     modifyTVar' todos (IntMap.filter (not . (.completed)))
-  items <- readTVarIO todos
+    readTVar todos
   render $ todoListSection items "" "all"
 
 -- Todo views
@@ -214,10 +213,10 @@ todoListSection items searchQ filterBy = [hsx|
       "active"    -> IntMap.toList $ IntMap.filter (not . (.completed)) searched
       "completed" -> IntMap.toList $ IntMap.filter (.completed) searched
       _           -> IntMap.toList searched
-    activeCount = IntMap.size $ IntMap.filter (not . (.completed)) items
+    activeCount = IntMap.size $ IntMap.filter (not . (.completed)) searched
     activeCountText :: Text
     activeCountText = show activeCount <> " item" <> (if activeCount == 1 then "" else "s") <> " left"
-    completedCount = IntMap.size $ IntMap.filter (.completed) items
+    completedCount = IntMap.size $ IntMap.filter (.completed) searched
     completedCountText :: Text
     completedCountText = show completedCount
     clearButton :: Html ()
@@ -241,7 +240,7 @@ todoItem i todo = [hsx|
   </li>
 |]
   where
-    patchPath = "/todos/" <> show i :: Text
+    patchPath  = "/todos/" <> show i :: Text
     deletePath = "/todos/" <> show i :: Text
     completed :: Html ()
     completed

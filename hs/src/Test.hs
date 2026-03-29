@@ -10,7 +10,6 @@ import Test.Tasty.Wai qualified as Test
 
 import Data.IntMap.Strict qualified as IntMap
 import Database
-import Hasql.Pool qualified as Pool
 import Hasql.Session
 import Hasql.Statement
 import Hasql.TH
@@ -39,22 +38,25 @@ testRoute = testGroup "Tasty.Wai Tests"
 
 mockApp :: Application
 mockApp = unsafePerformIO do
-  todos <- newTVarIO IntMap.empty
+  todos  <- newTVarIO IntMap.empty
   nextId <- newTVarIO 1
-  pure $ app todos nextId
+  pool   <- acquirePool
+  pure $ app pool todos nextId
 {-# NOINLINE mockApp #-}
 
 -- $> tasty testDB
 testDB :: TestTree
-testDB = testGroup "Database Tests"
-  [ testCase "runDB: sumAndDivMod 3 8 3" do
-      result <- runDB (sumAndDivModSession 3 8 3)
-      result @?= Right (Right (3, 2))
-  , testCase "withPool: sumAndDivMod 30 8 3" do
-      result <- withPool \pool ->
-        Pool.use pool (sumAndDivModSession 30 8 3)
-      result @?= Right (12, 2)
-  ]
+testDB = withResource acquirePool releasePool $ \getPool ->
+  testGroup "Database Tests"
+    [ testCase "runDB: sumAndDivMod 3 8 3" do
+        pool   <- getPool
+        result <- runDB pool (sumAndDivModSession 3 8 3)
+        result @?= Right (3, 2)
+    , testCase "runDB: sumAndDivMod 30 8 3" do
+        pool   <- getPool
+        result <- runDB pool (sumAndDivModSession 30 8 3)
+        result @?= Right (12, 2)
+    ]
 
 sumAndDivModSession :: Int64 -> Int64 -> Int64 -> Session (Int64, Int64)
 sumAndDivModSession a b c = do
@@ -74,4 +76,3 @@ divModStatement =
       (($1 :: int8) / ($2 :: int8)) :: int8,
       (($1 :: int8) % ($2 :: int8)) :: int8
   |]
-

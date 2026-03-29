@@ -8,10 +8,10 @@ import Language.Haskell.TH.Quote
 import Lucid
 
 hsx :: QuasiQuoter
-hsx= customHsx
+hsx = customHsx
     (HsxSettings
         { checkMarkup = True
-        , additionalTagNames = Set.fromList ["book", "heading", "name"]
+        , additionalTagNames = Set.empty
         , additionalAttributeNames = Set.fromList
             [ "hx-action"
             , "hx-boost"

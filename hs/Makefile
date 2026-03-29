@@ -2,7 +2,7 @@ SHELL := bash
 .ONESHELL:
 .SHELLFLAGS := -eu -o pipefail -c
 
-GHC  ?= 9.10
+GHC  ?= 9.12
 MAIN ?= Main
 EXE  := $(shell basename $(MAIN) .Main)
 
@@ -22,14 +22,13 @@ exe:
 env:
 	rm .ghc.environment.*$(GHC)* || true
 	cabal install -w ghc-$(GHC) --allow-newer --enable-documentation \
-    --package-env . \
-    --constraint='wai-app-static < 3.1.8' \
-    --lib base template-haskell text relude containers stm-containers \
-          aeson optics aeson-optics http-media pretty-show strict-wrapper \
-          breakpoint bluefin co-log io-classes io-sim \
-          hasql hasql-th hasql-pool hasql-transaction \
-          servant servant-client servant-server servant-quickcheck \
-          rapid twain wai wai-extra warp tasty tasty-hunit tasty-wai
+		--package-env . --lib \
+		base template-haskell containers optics relude text \
+		aeson aeson-optics generic-data safe-wild-cards strict-wrapper \
+		breakpoint co-log ki io-classes io-sim stm stm-containers \
+		hasql hasql-th hasql-pool hasql-transaction http-media \
+		ihp-hsx lucid2 servant servant-client servant-server \
+		rapid twain wai wai-extra warp tasty tasty-hunit tasty-wai
 
 hie:
 	hiedb-$(GHC) -D .hiedb index .build

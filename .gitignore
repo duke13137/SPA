@@ -17,3 +17,4 @@ node_modules
 ghcid.txt
 static-ls
 *tags*
+dist-newstyle/

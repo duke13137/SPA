@@ -17,6 +17,7 @@
 :set -fwrite-ide-info
 :set -outputdir .build
 
+:set -package pretty-show
 :set -isrc
 
 :load Main
