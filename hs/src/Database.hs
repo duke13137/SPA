@@ -3,16 +3,20 @@
 
 module Database
   ( Pool.Pool
+  , module Hasql.Session
+  , module Hasql.Statement
+  , module Hasql.Errors
   , acquirePool
   , releasePool
-  , runDB
+  , runDb
   ) where
 
 import Hasql.Connection.Settings qualified as Connection
 import Hasql.Errors
 import Hasql.Pool qualified as Pool
 import Hasql.Pool.Config qualified as Pool
-import Hasql.Session (Session)
+import Hasql.Session
+import Hasql.Statement
 
 acquirePool :: IO Pool.Pool
 acquirePool = do
@@ -30,8 +34,8 @@ acquirePool = do
 releasePool :: Pool.Pool -> IO ()
 releasePool = Pool.release
 
-runDB :: Pool.Pool -> Session a -> IO (Either Pool.UsageError a)
-runDB = Pool.use
+runDb :: Pool.Pool -> Session a -> IO (Either Pool.UsageError a)
+runDb = Pool.use
 
 getConnectionSetting :: IO Connection.Settings
 getConnectionSetting = do

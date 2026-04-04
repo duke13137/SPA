@@ -11,7 +11,6 @@ EXE  := $(shell basename $(MAIN) .Main)
 dev:
 	ghciwatch --clear --no-interrupt-reloads \
 		--command ghci-$(GHC) \
-		--after-reload-shell 'make hie' \
 		--error-file ghcid.txt \
 		--enable-eval --watch .
 
@@ -23,12 +22,12 @@ env:
 	rm .ghc.environment.*$(GHC)* || true
 	cabal install -w ghc-$(GHC) --allow-newer --enable-documentation \
 		--package-env . --lib \
-		base template-haskell containers optics relude text \
+		base template-haskell containers optics relude text vector \
 		aeson aeson-optics generic-data safe-wild-cards strict-wrapper \
 		breakpoint co-log ki io-classes io-sim stm stm-containers \
-		hasql hasql-th hasql-pool hasql-transaction http-media \
-		ihp-hsx lucid2 servant servant-client servant-server \
-		rapid twain wai wai-extra warp tasty tasty-hunit tasty-wai
+		hasql hasql-th hasql-pool hasql-transaction \
+		ihp-hsx lucid2 http-media http-types servant servant-client servant-server \
+		pretty-show show rapid twain wai wai-extra warp tasty tasty-hunit tasty-wai
 
 hie:
 	hiedb-$(GHC) -D .hiedb index .build

@@ -1,0 +1,6 @@
+space: my_space
+name: todos
+version: 1.0.0
+
+artifacts:
+  haskell: https://raw.githubusercontent.com/pgenie-io/haskell.gen/v0.2.1/gen/Gen.dhall
