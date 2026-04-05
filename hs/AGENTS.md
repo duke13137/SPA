@@ -1,14 +1,47 @@
-# Haskell Project Guide
+# Haskell Project — Agent Guide
 
-## Build & Development
+## Hard Rules
 
-- This project uses GHC directly (no .cabal or stack.yaml).
-- ghci loads `~/.ghci` and `.ghci`.
-- **DO NOT run cabal or stack**.
+- **DO NOT run `cabal`, `stack`, or `make`**
+- **DO NOT edit files in `.build/`**
+- After every file edit, read `ghcid.txt` before proceeding
 
-## Hole Driven Development
+## Build & Error Feedback
 
-- Watch ./ghcid.txt for compile errors after each code editing
-- Search <https://errors.haskell.org/index.html> for GHC-##### index
-- Browse module with `ghci -e ':browse! \*<module>'`
-- Read doc `hoogle --database .haskell.hoo -q --info <name>`
+`ghciwatch` runs in the background and writes live errors to `ghcid.txt`.
+
+```bash
+cat ghcid.txt          # check compile errors / test failures
+```
+
+GHC error codes → <https://errors.haskell.org/index.html>
+
+## Hole-Driven Development
+
+Write type signatures first; use `_` for unknowns. GHCid surfaces typed-hole
+suggestions in `ghcid.txt` immediately on save. Fill holes incrementally.
+
+## REPL-Driven Development
+
+1. Find the `ghci` pane in the tmux session
+2. Send commands/snippets via tmux (`:reload`, `:type`, `:browse! *Module`)
+3. Use eval comments to run expressions: `-- $> expr`
+
+```bash
+# Explore a module
+ghci -e ':browse! Prelude'
+ghci -e ':browse! Data.Map.Strict'
+
+# Docs by name or type
+ghci -e ':hoogle traverse'
+ghci -e ':hoogle a -> Maybe b'
+ghci -e ':hdoc traverse'
+```
+
+## Testing
+
+```
+-- In GHCi (or as eval comment):
+tasty testRoute
+tasty testDB
+```

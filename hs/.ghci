@@ -1,23 +1,21 @@
-:set -fplugin=Debug.Breakpoint
-
 :seti -XGHC2024
-:seti -XPartialTypeSignatures
+:seti -XDuplicateRecordFields
 :seti -XNoFieldSelectors
 :seti -XOverloadedLabels
 :seti -XOverloadedRecordDot
+:seti -XMagicHash
+:seti -XPartialTypeSignatures
 
-:set -fdefer-type-errors
-:set -fno-defer-typed-holes
 :set -Werror=deferred-out-of-scope-variables
 :set -Werror=deferred-type-errors
 
 :set -Wno-type-defaults
 :set -Wno-unused-top-binds
 
-:set -fwrite-ide-info
+:set -fdefer-type-errors
+:set -fno-defer-typed-holes
+:set -fplugin=Debug.Breakpoint
+
 :set -outputdir .build
-
-:set -package pretty-show
 :set -isrc
-
 :load Main
