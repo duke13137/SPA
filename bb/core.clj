@@ -118,8 +118,8 @@
     (println "serving" url)))
 
 (when (= *file* (System/getProperty "babashka.file"))
-  (browser/start! {:nrepl-port 1333 :websocket-port 1340})
-  (nrepl/start-server! {:host "127.0.0.1" :port 1666})
+  (browser/start! {:nrepl-port 3339 :websocket-port 3340})
+  (nrepl/start-server! {:host "127.0.0.1" :port 3341})
   (-main)
   #_(srv)
   @(promise))

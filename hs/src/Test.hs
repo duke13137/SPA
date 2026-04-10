@@ -90,6 +90,9 @@ testRoute = withResource acquirePool releasePool \getPool ->
       _ <- Test.postWithHeaders "/todos" "title=Task+A" [("Content-Type", "application/x-www-form-urlencoded")]
       _ <- Test.postWithHeaders "/todos" "title=Task+B" [("Content-Type", "application/x-www-form-urlencoded")]
       _ <- Test.postWithHeaders "/todos" "title=Task+C" [("Content-Type", "application/x-www-form-urlencoded")]
+      respDupAdd <- Test.postWithHeaders "/todos" "title=Task+C" [("Content-Type", "application/x-www-form-urlencoded")]
+      assertStatus 200 respDupAdd
+      assertBodyContains "todo-highlight" respDupAdd
 
       -- Search for "Task A"
       respSearch <- Test.get "/todos/list?search=Task+A"
@@ -100,11 +103,19 @@ testRoute = withResource acquirePool releasePool \getPool ->
 
       -- Get all IDs and toggle first two
       Right allTodos <- liftIO $ runDb pool getTodosSession
+      liftIO $ length allTodos @?= 3
       let allIds = map (.id) allTodos
       case allIds of
         (a:b:_) -> do
-          let aStr = encodeUtf8 (show a :: Text)
           let bStr = encodeUtf8 (show b :: Text)
+          respDupUpdate <- Test.srequest $
+            Test.buildRequestWithHeaders PUT ("/todos/" <> bStr) "title=Task+A" [("Content-Type", "application/x-www-form-urlencoded")]
+          assertStatus 200 respDupUpdate
+
+          Right afterDupUpdate <- liftIO $ runDb pool getTodosSession
+          liftIO $ map (.title) afterDupUpdate @?= ["Task A", "Task B", "Task C"]
+
+          let aStr = encodeUtf8 (show a :: Text)
           _ <- Test.srequest $ Test.buildRequestWithHeaders PATCH ("/todos/" <> aStr) "" []
           _ <- Test.srequest $ Test.buildRequestWithHeaders PATCH ("/todos/" <> bStr) "" []
           pass

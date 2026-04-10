@@ -48,6 +48,12 @@ import Web.Twain as Twain
 data Todo = Todo { id :: Int64, title :: Text, completed :: Bool }
   deriving (Eq, Show)
 
+normalizeTitle :: Text -> Text
+normalizeTitle = T.strip
+
+normalizeTitleKey :: Text -> Text
+normalizeTitleKey = T.toCaseFold . normalizeTitle
+
 render :: Html () -> ResponderM a
 render = Twain.send . Twain.html . renderBS
 
@@ -60,6 +66,15 @@ htmx body = [hsx|
       <meta name="viewport" content="width=device-width, initial-scale=1.0">
       <title>My Simple HTML Page</title>
       <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@picocss/pico@2/css/pico.min.css">
+      <style>
+        @keyframes todo-flash {
+          0% { background-color: color-mix(in srgb, var(--pico-primary), transparent 78%); }
+          100% { background-color: transparent; }
+        }
+        .todo-highlight {
+          animation: todo-flash 1.5s ease-out;
+        }
+      </style>
       <script defer src="https://cdn.jsdelivr.net/npm/htmx.org@next"></script>
     </head>
     <body>
@@ -119,13 +134,20 @@ addTodo pool = do
   title' <- Twain.param @Text "title"
   filter_ <- Twain.paramMaybe @Text "filter"
   search_ <- Twain.paramMaybe @Text "search"
-  runDbOr500 pool (addTodoSession title')
+  let normalizedTitle = normalizeTitle title'
+  isDuplicate <- runDbOr500 pool (todoTitleExistsSession normalizedTitle)
+  duplicateTodo <-
+    if isDuplicate
+      then runDbOr500 pool (getTodoByTitleSession normalizedTitle)
+      else pure Nothing
+  unless (T.null normalizedTitle || isDuplicate) $
+    runDbOr500 pool (addTodoSession normalizedTitle)
   items <- runDbOr500 pool getTodosSession
   let f = fromMaybe "all" filter_
   let s = fromMaybe "" search_
   -- breakpointIO
   render do
-    todoListSection items s f
+    todoListSectionHighlighted items s f (fmap (.id) duplicateTodo)
     [hsx|<input id="todo-input" name="title" placeholder="What needs to be done?" required autofocus hx-swap-oob="true">|]
 
 toggleTodo :: Pool -> ResponderM a
@@ -166,7 +188,7 @@ editTodoForm pool = do
     Just todo -> render [hsx|
       <li style="display: flex; align-items: center; gap: 0.5rem; padding: 0.5rem 0; border-bottom: 1px solid var(--pico-muted-border-color);"
           id={"todo-item-" <> show todo.id :: Text}>
-        <form hx-put={"/todos/" <> show todo.id :: Text} hx-target={"#todo-item-" <> show todo.id :: Text} hx-swap="outerHTML" style="width: 100%; display: flex; margin-bottom: 0;">
+        <form hx-put={"/todos/" <> show todo.id :: Text} hx-include="#todo-list-form" hx-target="#todo-list" hx-swap="outerHTML" style="width: 100%; display: flex; margin-bottom: 0;">
           <input type="text" name="title" value={todo.title} required autofocus style="flex: 1; margin-bottom: 0;">
           <button type="submit" class="outline" style="margin-left: 0.5rem; width: auto; padding: 0.25rem 0.5rem; margin-bottom: 0;">Save</button>
         </form>
@@ -178,16 +200,53 @@ updateTodo :: Pool -> ResponderM a
 updateTodo pool = do
   i <- Twain.param @Int64 "id"
   title' <- Twain.param @Text "title"
-  runDbOr500 pool (updateTodoTitleSession i title')
-  mTodo <- runDbOr500 pool (getTodoSession i)
+  filter_ <- Twain.paramMaybe @Text "filter"
+  search_ <- Twain.paramMaybe @Text "search"
+  let normalizedTitle = normalizeTitle title'
+  isDuplicate <- runDbOr500 pool (todoTitleExistsExceptSession i normalizedTitle)
+  unless (T.null normalizedTitle || isDuplicate) $
+    runDbOr500 pool (updateTodoTitleSession i normalizedTitle)
+  items <- runDbOr500 pool getTodosSession
   -- breakpointIO
-  case mTodo of
-    Just todo -> render $ todoItem todo
-    Nothing   -> send $ Twain.status (toEnum 404) $ Twain.html "Todo not found"
+  render $ todoListSection items (fromMaybe "" search_) (fromMaybe "all" filter_)
 
 addTodoSession :: Text -> Session ()
 addTodoSession title' = statement title'
   [resultlessStatement| insert into todos (title) values ($1 :: text) |]
+
+todoTitleExistsSession :: Text -> Session Bool
+todoTitleExistsSession title' = do
+  res <- statement title'
+    [maybeStatement|
+      select 1 :: int4
+      from todos
+      where lower(btrim(title)) = lower(btrim($1 :: text))
+      limit 1
+    |]
+  pure $ isJust res
+
+getTodoByTitleSession :: Text -> Session (Maybe Todo)
+getTodoByTitleSession title' = do
+  fmap (\(id', title'', completed') -> Todo id' title'' completed') <$> statement title'
+    [maybeStatement|
+      select id :: int8, title :: text, completed :: bool
+      from todos
+      where lower(btrim(title)) = lower(btrim($1 :: text))
+      order by id
+      limit 1
+    |]
+
+todoTitleExistsExceptSession :: Int64 -> Text -> Session Bool
+todoTitleExistsExceptSession id' title' = do
+  res <- statement (id', title')
+    [maybeStatement|
+      select 1 :: int4
+      from todos
+      where id <> $1 :: int8
+        and lower(btrim(title)) = lower(btrim($2 :: text))
+      limit 1
+    |]
+  pure $ isJust res
 
 toggleTodoSession :: Int64 -> Session ()
 toggleTodoSession id' = statement id'
@@ -216,20 +275,21 @@ todoPage :: [Todo] -> Text -> Html ()
 todoPage items filterBy = htmx [hsx|
   <article>
     <h1>Todos</h1>
-    <form hx-post="/todos" hx-include="#todo-list-form" hx-target="#todo-list">
+    <form hx-post="/todos" hx-include="#todo-list-form" hx-target="#todo-list" hx-swap="outerHTML">
       <fieldset role="group">
         <input id="todo-input" name="title" placeholder="What needs to be done?" required>
         <button type="submit">Add</button>
       </fieldset>
     </form>
-    <input type="search" name="search"
-           hx-get="/todos/list" hx-trigger="input changed delay:300ms, search"
-           hx-target="#todo-list" placeholder="Search todos...">
+    <input type="text" name="search" autocomplete="off"
+           hx-get="/todos/list" hx-trigger="input delay:300ms, search"
+           hx-include="#todo-list-form [name='filter']"
+           hx-target="#todo-list" hx-swap="outerHTML" placeholder="Search todos...">
     <nav>
       <ul>
-        <li><a href="#" hx-get="/todos/list?filter=all" hx-target="#todo-list">All</a></li>
-        <li><a href="#" hx-get="/todos/list?filter=active" hx-target="#todo-list">Active</a></li>
-        <li><a href="#" hx-get="/todos/list?filter=completed" hx-target="#todo-list">Completed</a></li>
+        <li><a href="#" hx-get="/todos/list?filter=all" hx-include="#todo-list-form [name='search']" hx-target="#todo-list" hx-swap="outerHTML">All</a></li>
+        <li><a href="#" hx-get="/todos/list?filter=active" hx-include="#todo-list-form [name='search']" hx-target="#todo-list" hx-swap="outerHTML">Active</a></li>
+        <li><a href="#" hx-get="/todos/list?filter=completed" hx-include="#todo-list-form [name='search']" hx-target="#todo-list" hx-swap="outerHTML">Completed</a></li>
       </ul>
     </nav>
     {todoListSection items "" filterBy}
@@ -237,13 +297,16 @@ todoPage items filterBy = htmx [hsx|
 |]
 
 todoListSection :: [Todo] -> Text -> Text -> Html ()
-todoListSection items searchQ filterBy = [hsx|
+todoListSection items searchQ filterBy = todoListSectionHighlighted items searchQ filterBy Nothing
+
+todoListSectionHighlighted :: [Todo] -> Text -> Text -> Maybe Int64 -> Html ()
+todoListSectionHighlighted items searchQ filterBy highlightedTodoId = [hsx|
   <section id="todo-list">
     <form id="todo-list-form">
       <input type="hidden" name="filter" value={filterBy}>
       <input type="hidden" name="search" value={searchQ}>
       <ul style="list-style: none; padding: 0;">
-        {mapM_ todoItem matched}
+        {mapM_ (todoItemHighlighted highlightedTodoId) matched}
       </ul>
       <footer style="display: flex; justify-content: space-between; align-items: center;">
         <small>{activeCountText}</small>
@@ -269,19 +332,23 @@ todoListSection items searchQ filterBy = [hsx|
     clearButton :: Html ()
     clearButton
       | completedCount > 0 = [hsx|
-          <button class="outline" hx-post="/todos/clear" hx-include="#todo-list-form" hx-target="#todo-list">
+          <button class="outline" hx-post="/todos/clear" hx-include="#todo-list-form" hx-target="#todo-list" hx-swap="outerHTML">
             Clear completed ({completedCountText})
           </button>
         |]
       | otherwise = mempty
 
 todoItem :: Todo -> Html ()
-todoItem todo = [hsx|
+todoItem = todoItemHighlighted Nothing
+
+todoItemHighlighted :: Maybe Int64 -> Todo -> Html ()
+todoItemHighlighted highlightedTodoId todo = [hsx|
   <li style="display: flex; align-items: center; gap: 0.5rem; padding: 0.5rem 0; border-bottom: 1px solid var(--pico-muted-border-color);"
+      class={classes}
       id={"todo-item-" <> show todo.id :: Text}>
     {completed}
     {titleHtml}
-    <button class="outline secondary" hx-delete={deletePath} hx-include="#todo-list-form" hx-target="#todo-list" hx-confirm="Delete this todo?"
+    <button class="outline secondary" hx-delete={deletePath} hx-include="#todo-list-form" hx-target="#todo-list" hx-swap="outerHTML" hx-confirm="Delete this todo?"
             style="margin-left: auto; width: auto; padding: 0.25rem 0.5rem; margin-bottom: 0;">
       ✕
     </button>
@@ -291,10 +358,14 @@ todoItem todo = [hsx|
     patchPath  = "/todos/" <> show todo.id :: Text
     deletePath = "/todos/" <> show todo.id :: Text
     editPath   = "/todos/" <> show todo.id <> "/edit" :: Text
+    classes :: Text
+    classes
+      | Just todo.id == highlightedTodoId = "todo-highlight"
+      | otherwise = ""
     completed :: Html ()
     completed
-      | todo.completed = [hsx|<input type="checkbox" checked hx-patch={patchPath} hx-include="#todo-list-form" hx-target="#todo-list" style="margin-bottom: 0;">|]
-      | otherwise      = [hsx|<input type="checkbox" hx-patch={patchPath} hx-include="#todo-list-form" hx-target="#todo-list" style="margin-bottom: 0;">|]
+      | todo.completed = [hsx|<input type="checkbox" checked hx-patch={patchPath} hx-include="#todo-list-form" hx-target="#todo-list" hx-swap="outerHTML" style="margin-bottom: 0;">|]
+      | otherwise      = [hsx|<input type="checkbox" hx-patch={patchPath} hx-include="#todo-list-form" hx-target="#todo-list" hx-swap="outerHTML" style="margin-bottom: 0;">|]
     titleHtml :: Html ()
     titleHtml
       | todo.completed = [hsx|<s style="opacity: 0.5;" hx-get={editPath} hx-trigger="dblclick" hx-target={"#todo-item-" <> show todo.id :: Text} hx-swap="outerHTML">{todo.title}</s>|]
